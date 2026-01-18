@@ -1687,7 +1687,16 @@ def load_config(path: Path) -> tuple[dict[str, DiskConfig], int]:
         # Use key as display name, allow override with 'name' at top level for backward compat
         display_name = cfg.get("name", device_key)
 
-        device_type = cfg.get("type")
+        # If given the device type, parse it.
+        # Otherwise, take our best guess from the device name.
+        if "type" in cfg:
+            device_type = cfg["type"]
+        elif device.startswith("sd"):
+            device_type = "hdd"
+        elif device.startswith("nvme"):
+            device_type = "ssd"
+        else:
+            device_type = "net"
 
         # Determine if this is a network device
         is_net = device_type == "net"
