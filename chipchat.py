@@ -1807,7 +1807,7 @@ def main():
     # Calculate text widths once at startup
     text_widths = calc_text_widths(configs, columns)
 
-    with Live(console=console, refresh_per_second=4, screen=False) as live:
+    with Live(console=console, refresh_per_second=4, screen=True) as live:
         while True:
             try:
                 curr_disk_stats = read_diskstats()
