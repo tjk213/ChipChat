@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chipchat"
+version = "0.1.0"
+description = "Per-device I/O monitor showing meters for disks and network interfaces"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "pyyaml",
+    "rich",
+]
+
+[project.scripts]
+chipchat = "chipchat:main"
+
+[tool.setuptools]
+py-modules = ["chipchat"]
