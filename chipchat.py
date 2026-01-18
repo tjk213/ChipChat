@@ -1249,6 +1249,8 @@ def render_display(
     for _ in range(columns):
         outer_table.add_column(width=column_width)
 
+    outer_table.add_row(*[""] * columns)  # blank line at top
+
     # Process devices in groups of `columns`
     for i in range(0, len(devices), columns):
         group = devices[i:i + columns]
