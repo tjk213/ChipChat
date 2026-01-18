@@ -12,19 +12,15 @@
 <!-- ○═════════════════════════════════════════════════════════════════════○ -->
 
 # ChipChat
+![example](doc/example.png)
 
-```
-○───────────┤ ╔═╗┬ ┬┬┌─┐╔═╗┬ ┬┌─┐┌┬┐ ├───────────○
-○───────────┤ ║  ├─┤│├─┘║  ├─┤├─┤ │  ├───────────○
-○───────────┤ ╚═╝┴ ┴┴┴  ╚═╝┴ ┴┴ ┴ ┴  ├───────────○
-```
-
-Per-device I/O monitor showing meters for disks and network interfaces.
+I/O monitor showing meters for disks and network interfaces.
 
 ## Installation
 
 ```bash
-pip install -r requirements.txt
+ChipChat % pip install -r requirements.txt
+ChipChat % pip install -e .
 ```
 
 ## Configuration
