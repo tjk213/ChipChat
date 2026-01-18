@@ -1755,6 +1755,61 @@ def load_config(path: Path) -> tuple[dict[str, DiskConfig], int]:
     return configs, columns
 
 
+def format_time(seconds: float) -> str:
+    """Format time in seconds to human-readable string (e.g., 5m, 300s, 500ms)"""
+    if seconds >= 3600:
+        return f"{seconds/3600:.0f}h"
+    elif seconds >= 60:
+        return f"{seconds/60:.0f}m"
+    elif seconds >= 1:
+        return f"{seconds:.0f}s"
+    else:
+        return f"{seconds*1000:.0f}ms"
+
+
+def format_rate(value: float, unit_type: str) -> str:
+    """Format a rate value with appropriate suffix for 3-5 digit display.
+
+    unit_type: "bandwidth" for MB/s, GB/s etc., "iops" for I/s, KI/s etc., "pps" for P/s, KP/s etc.
+    """
+    if value == 0:
+        if unit_type == "bandwidth":
+            return "0 MB/s"
+        elif unit_type == "pps":
+            return "0  P/s"
+        else:
+            return "0  I/s"
+
+    if unit_type == "bandwidth":
+        # Convert MB/s to bytes/s
+        bps = value * 1e6
+        units = [(" B/s", 1), ("KB/s", 1e3), ("MB/s", 1e6), ("GB/s", 1e9), ("TB/s", 1e12)]
+    elif unit_type == "pps":
+        bps = value
+        units = [(" P/s", 1), ("KP/s", 1e3), ("MP/s", 1e6), ("GP/s", 1e9)]
+    else:  # iops
+        bps = value
+        units = [(" I/s", 1), ("KI/s", 1e3), ("MI/s", 1e6), ("GI/s", 1e9)]
+
+    # Find unit that gives 3-5 digits (100 to 99999)
+    for unit, divisor in reversed(units):
+        val = bps / divisor
+        if 100 <= val < 100000:
+            return f"{val:.0f} {unit}"
+
+    # Fallback for small values
+    for unit, divisor in units:
+        val = bps / divisor
+        if val >= 1:
+            return f"{val:.0f} {unit}"
+
+    if unit_type == "bandwidth":
+        return f"{value:.0f} MB/s"
+    elif unit_type == "pps":
+        return f"{value:.0f}  P/s"
+    else:
+        return f"{value:.0f}  I/s"
+
 def main():
     parser = ArgumentParser(description=DESCRIPTION,
                             formatter_class=lambda prog: RTHF(prog, max_help_position=80))
@@ -1941,61 +1996,4 @@ def main():
             print(f"  {label}:{label_pad} {value_pad} {suffix}")
 
 
-def format_time(seconds: float) -> str:
-    """Format time in seconds to human-readable string (e.g., 5m, 300s, 500ms)"""
-    if seconds >= 3600:
-        return f"{seconds/3600:.0f}h"
-    elif seconds >= 60:
-        return f"{seconds/60:.0f}m"
-    elif seconds >= 1:
-        return f"{seconds:.0f}s"
-    else:
-        return f"{seconds*1000:.0f}ms"
-
-
-def format_rate(value: float, unit_type: str) -> str:
-    """Format a rate value with appropriate suffix for 3-5 digit display.
-
-    unit_type: "bandwidth" for MB/s, GB/s etc., "iops" for I/s, KI/s etc., "pps" for P/s, KP/s etc.
-    """
-    if value == 0:
-        if unit_type == "bandwidth":
-            return "0 MB/s"
-        elif unit_type == "pps":
-            return "0  P/s"
-        else:
-            return "0  I/s"
-
-    if unit_type == "bandwidth":
-        # Convert MB/s to bytes/s
-        bps = value * 1e6
-        units = [(" B/s", 1), ("KB/s", 1e3), ("MB/s", 1e6), ("GB/s", 1e9), ("TB/s", 1e12)]
-    elif unit_type == "pps":
-        bps = value
-        units = [(" P/s", 1), ("KP/s", 1e3), ("MP/s", 1e6), ("GP/s", 1e9)]
-    else:  # iops
-        bps = value
-        units = [(" I/s", 1), ("KI/s", 1e3), ("MI/s", 1e6), ("GI/s", 1e9)]
-
-    # Find unit that gives 3-5 digits (100 to 99999)
-    for unit, divisor in reversed(units):
-        val = bps / divisor
-        if 100 <= val < 100000:
-            return f"{val:.0f} {unit}"
-
-    # Fallback for small values
-    for unit, divisor in units:
-        val = bps / divisor
-        if val >= 1:
-            return f"{val:.0f} {unit}"
-
-    if unit_type == "bandwidth":
-        return f"{value:.0f} MB/s"
-    elif unit_type == "pps":
-        return f"{value:.0f}  P/s"
-    else:
-        return f"{value:.0f}  I/s"
-
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
