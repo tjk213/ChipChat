@@ -558,7 +558,70 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
         if thresholds_raw:
             thresholds = parse_thresholds(thresholds_raw, parse_percentage_value)
         else:
-            # Default usage thresholds based on device type
+            ## Default usage thresholds based on device type
+            ##
+            ## These default usage color curves are chosen to try to help users
+            ## understand performance, rather than to warn about actual capacity
+            ## running low.
+            ##
+            ## HDDs perform faster at low usage because the outer sectors of the
+            ## platters literally spin faster, which increases the rate at which
+            ## the disk head flies over them. SSDs also degrade in performance as
+            ## capacity fills up, but for a different reason. SSD controllers need
+            ## spare capacity for active garbage collection, write amplification,
+            ## and partial block management.
+            ##
+            ## According to Claude, HDD performance is a square-root curve w.r.t.
+            ## usage. I believe this is correct. Claude provides the following:
+            ##
+            ## If you work through the math: at fill level f, you're operating at
+            ## radius:
+            ##
+            ##    r = sqrt(R_outer² - f × (R_outer² - R_inner²))
+            ##
+            ## And performance is proportional to that r. So performance vs fill
+            ## is a square root curve, not a line.
+            ##
+            ## Practically, for a typical 3.5" drive (inner radius ~25mm, outer ~48mm):
+            ##
+			##     Fill %	Approx Performance
+            ##     ---------------------------
+			##     0%	    100%
+			##     25%	    90%
+			##     50%	    80%
+			##     75%	    66%
+			##     100%	    52%
+            ##
+            ## Benchmarks running `fio` confirm that the innermost sectors on my
+            ## Toshiba N300 Pros are almost exactly half as fast as the outermost.
+            ##
+            ## SSDs, on the other hand, have a performance degradation curve that
+            ## is closer to a cliff. As long as there is enough spare capacity for
+            ## the controller to do it's thing, everything should operate at full
+            ## speed. And some drives reserve hidden capacity permanently for the
+            ## controller, so it's hard to know where exactly the cliff is.
+            ##
+            ## For the most part, neither encryption nor raid nor LVM should
+            ## effect any of this - they all map sectors through transparently.
+            ##
+            ## But of course in order for the color codes to correlate with
+            ## performance there is an assumption: you must be reading from the
+            ## most-recently-written sectors on the drive, and writing to either
+            ## the same sectors or to new, previously-unused sectors (i.e.,
+            ## filling up the drive further). If you fill up the drive to the
+            ## red level and then issue reads only to old data on the outer
+            ## sectors, performance will be fine. In fact on SSDs if you're only
+            ## issuing reads, you'd probably be okay on any sectors. This
+            ## assumption is therefore clearly not foolproof but is essentially
+            ## the standard cache locality heuristic, and so should hold in many
+            ## cases.
+            ##
+            ## One case where this assumption could really break down is with
+            ## poorly planned partitions. If you split your HDD into 2 halves
+            ## and dedicate the first half to a rarely-used mostly-empty backup
+            ## partition, then your active partition will be getting inner-sector
+            ## bandwidth while your usage reading remains low. The outer sectors
+            ## aren't full; they're just getting skipped.
             if device_type == "ssd":
                 thresholds = [
                     Threshold(value=None, style=DEFAULT_THRESHOLD_STYLES[0]),
