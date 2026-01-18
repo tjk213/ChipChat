@@ -62,6 +62,7 @@ text:
   - usage: { thresholds: [50%, 80%, 99%] }  # Usage rate of drive; thresholds apply different styles
                                             # Renders IFF disk.mount_points[] is set
   - temp: { downsample: 10 }                # Drive temperature; updated every 10th refresh
+                                            # Note: requires password-less sudo for SATA drives
 ```
 
 **Network text:**
