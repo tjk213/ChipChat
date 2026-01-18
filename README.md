@@ -117,3 +117,6 @@ implemented with the following configuration:
 - bandwidth: { max: auto, halflife: 60s, label: util, color: yellow}
 ```
 
+## Acknowledgements
+
+`ChipChat` was primarily authored by Claude Opus-4.5, with web search and extended thinking modes enabled.
