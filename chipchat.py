@@ -952,7 +952,7 @@ def get_sata_temp(device: str) -> float | None:
     """Get current temperature in Celsius for a SATA device via smartctl"""
     try:
         result = subprocess.run(
-            ["sudo", "smartctl", "-A", f"/dev/{device}"],
+            ["sudo", "-n", "smartctl", "-A", f"/dev/{device}"],
             capture_output=True,
             text=True,
             timeout=5,
