@@ -13,22 +13,24 @@
 ## ○════════════════════════════════════════════════════════════════════════○ ##
 
 
-"""
-ChipChat - Per-device I/O monitor with meters for disks and network interfaces
-"""
-
 from __future__ import annotations
+
+DESCRIPTION="""
+ChipChat - I/O monitor with meters for disks and network interfaces
+"""
 
 import glob
 import re
 import subprocess
 import time
 import shutil
-import argparse
+import yaml
+
+from argparse import ArgumentParser
+from argparse import RawTextHelpFormatter as RTHF
 from pathlib import Path
 from dataclasses import dataclass
 
-import yaml
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
@@ -1754,23 +1756,29 @@ def load_config(path: Path) -> tuple[dict[str, DiskConfig], int]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ChipChat - Per-device I/O monitor")
+    parser = ArgumentParser(description=DESCRIPTION,
+                            formatter_class=lambda prog: RTHF(prog, max_help_position=80))
     parser.add_argument(
         "-c", "--config",
         type=Path,
+        metavar="/path/to/confg.yaml",
         default=Path.home() / ".config" / "chipchat" / "config.yaml",
-        help="Path to config file",
+        help=(
+            "Path to configuration YAML.\n"
+            "Default: ~/.config/chipchat/config.yaml"
+        )
     )
     parser.add_argument(
         "-i", "--interval",
         type=float,
         default=1.0,
-        help="Update interval in seconds",
+        metavar="<float>",
+        help="Refresh rate in seconds.",
     )
     parser.add_argument(
         "-f", "--fahrenheit",
         action="store_true",
-        help="Display temperatures in Fahrenheit",
+        help="Display temperatures in Freedom units.",
     )
 
     args = parser.parse_args()
