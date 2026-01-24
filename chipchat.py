@@ -124,6 +124,13 @@ class NetMetrics:
 
 
 @dataclass
+class WifiInfo:
+    """WiFi connection information from iw dev"""
+    signal_dbm: float | None
+    ssid: str | None
+
+
+@dataclass
 class MeterConfig:
     """Per-meter configuration"""
     type: str  # "utilization", "iops", "bandwidth", "blank"
@@ -793,15 +800,18 @@ def compute_net_metrics(prev: NetStats, curr: NetStats) -> NetMetrics:
     )
 
 
-def get_wifi_signal(device: str) -> float | None:
-    """Get WiFi signal strength in dBm.
+def get_wifi_info(device: str) -> WifiInfo:
+    """Get WiFi signal strength and SSID with a single iw call.
 
-    Tries /proc/net/wireless first, falls back to `iw dev` for newer drivers
-    that don't populate /proc/net/wireless.
+    Tries /proc/net/wireless first for signal (faster, no subprocess),
+    falls back to `iw dev` for newer drivers that don't populate /proc/net/wireless.
 
-    Returns None if device is not a wireless interface or not connected.
+    Returns WifiInfo with signal_dbm and ssid (either may be None if not available).
     """
-    # Try /proc/net/wireless first (faster, no subprocess)
+    signal_dbm: float | None = None
+    ssid: str | None = None
+
+    # Try /proc/net/wireless first for signal (faster, no subprocess)
     try:
         with open("/proc/net/wireless") as f:
             # Skip header lines
@@ -816,37 +826,12 @@ def get_wifi_signal(device: str) -> float | None:
                     if iface == device:
                         # Level is the third value (index 3), may have trailing period
                         level_str = parts[3].rstrip('.')
-                        return float(level_str)
+                        signal_dbm = float(level_str)
+                        break
     except (OSError, StopIteration, ValueError, IndexError):
         pass
 
-    # Fallback to `iw dev` for newer drivers (WiFi 6/6E)
-    try:
-        result = subprocess.run(
-            ["iw", "dev", device, "link"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        if result.returncode == 0:
-            for line in result.stdout.splitlines():
-                line = line.strip()
-                if line.startswith("signal:"):
-                    # Format: "signal: -50 dBm"
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        return float(parts[1])
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError):
-        pass
-
-    return None
-
-
-def get_wifi_ssid(device: str) -> str | None:
-    """Get WiFi SSID from `iw dev`.
-
-    Returns None if device is not a wireless interface or not connected.
-    """
+    # Call `iw dev` once to get SSID (and signal if not found above)
     try:
         result = subprocess.run(
             ["iw", "dev", device, "link"],
@@ -859,11 +844,20 @@ def get_wifi_ssid(device: str) -> str | None:
                 line = line.strip()
                 if line.startswith("SSID:"):
                     # Format: "SSID: My Network Name"
-                    return line[5:].strip()
+                    ssid = line[5:].strip()
+                elif signal_dbm is None and line.startswith("signal:"):
+                    # Format: "signal: -50 dBm"
+                    # Only use this if /proc/net/wireless didn't work
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            signal_dbm = float(parts[1])
+                        except ValueError:
+                            pass
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
-    return None
+    return WifiInfo(signal_dbm=signal_dbm, ssid=ssid)
 
 
 def get_ipv4_address(device: str) -> str | None:
@@ -1179,8 +1173,9 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
             values["capacity_pct"] = get_capacity_pct(device, cfg.mount_points)
             values["temp_c"] = get_disk_temp(device)
         else:
-            values["signal_dbm"] = get_wifi_signal(device)
-            values["ssid"] = get_wifi_ssid(device)
+            wifi_info = get_wifi_info(device)
+            values["signal_dbm"] = wifi_info.signal_dbm
+            values["ssid"] = wifi_info.ssid
             values["ip_addr"] = get_ipv4_address(device)
 
         device_text_values[device] = values
@@ -1295,8 +1290,9 @@ def render_display(
                 temp_cache[device] = get_disk_temp(device)
             values["temp_c"] = temp_cache.get(device) if temp_downsample > 0 else None
         else:
-            values["signal_dbm"] = get_wifi_signal(device)
-            values["ssid"] = get_wifi_ssid(device)
+            wifi_info = get_wifi_info(device)
+            values["signal_dbm"] = wifi_info.signal_dbm
+            values["ssid"] = wifi_info.ssid
             values["ip_addr"] = get_ipv4_address(device)
 
         device_text_values[device] = values
