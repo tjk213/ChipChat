@@ -523,7 +523,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
     elif text_type == "signal":
         inverted = True  # lower dBm values are worse
     elif text_type in ("ssid", "ip", "freq"):
-        style = text_opts.get("style")
+        style = text_opts.get("style", "blue")
     elif text_type == "usage":
         scale = float(text_opts.get("scale", 1.0))
         offset = float(text_opts.get("offset", 0.0))
