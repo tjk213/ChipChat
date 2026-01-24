@@ -128,6 +128,7 @@ class WifiInfo:
     """WiFi connection information from iw dev"""
     signal_dbm: float | None
     ssid: str | None
+    freq_mhz: float | None
 
 
 @dataclass
@@ -151,7 +152,7 @@ class Threshold:
 @dataclass
 class TextConfig:
     """Per-text-element configuration"""
-    type: str  # "name", "temp", "usage", "signal", "ssid", "ip", "blank"
+    type: str  # "name", "temp", "usage", "signal", "ssid", "ip", "freq", "blank"
     thresholds: list[Threshold]  # ordered list of thresholds
     val: str | None  # for name: display value
     downsample: int  # for temp: poll every N refreshes (0 = disable)
@@ -472,6 +473,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
         - "signal" -> TextConfig(type="signal", thresholds=[default signal thresholds], inverted=True) [net only]
         - "ssid" -> TextConfig(type="ssid", ...) [net only, WiFi SSID]
         - "ip" -> TextConfig(type="ip", ...) [net only, IPv4 address]
+        - "freq" -> TextConfig(type="freq", ...) [net only, WiFi frequency in GHz]
         - "blank" -> TextConfig(type="blank", ...)
         - {"name": {"val": "Custom Name", "style": "cyan"}} -> TextConfig with custom name and style
         - {"ssid": {"style": "green"}} -> TextConfig with custom style
@@ -492,13 +494,13 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
     else:
         raise ValueError(f"Invalid text spec: {text_spec}")
 
-    valid_types = {"name", "temp", "usage", "signal", "ssid", "ip", "blank"}
+    valid_types = {"name", "temp", "usage", "signal", "ssid", "ip", "freq", "blank"}
     if text_type not in valid_types:
         raise ValueError(f"Invalid text type: {text_type}. Valid: {valid_types}")
 
     # Validate text types for device type
     disk_only_types = {"temp", "usage"}
-    net_only_types = {"signal", "ssid", "ip"}
+    net_only_types = {"signal", "ssid", "ip", "freq"}
 
     if device_type == "net" and text_type in disk_only_types:
         raise ValueError(f"Text type '{text_type}' not valid for net devices")
@@ -520,7 +522,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
         downsample = text_opts.get("downsample", 10)  # default: poll every 10 refreshes
     elif text_type == "signal":
         inverted = True  # lower dBm values are worse
-    elif text_type in ("ssid", "ip"):
+    elif text_type in ("ssid", "ip", "freq"):
         style = text_opts.get("style")
     elif text_type == "usage":
         scale = float(text_opts.get("scale", 1.0))
@@ -801,15 +803,16 @@ def compute_net_metrics(prev: NetStats, curr: NetStats) -> NetMetrics:
 
 
 def get_wifi_info(device: str) -> WifiInfo:
-    """Get WiFi signal strength and SSID with a single iw call.
+    """Get WiFi signal strength, SSID, and frequency with a single iw call.
 
     Tries /proc/net/wireless first for signal (faster, no subprocess),
     falls back to `iw dev` for newer drivers that don't populate /proc/net/wireless.
 
-    Returns WifiInfo with signal_dbm and ssid (either may be None if not available).
+    Returns WifiInfo with signal_dbm, ssid, and freq_mhz (any may be None if not available).
     """
     signal_dbm: float | None = None
     ssid: str | None = None
+    freq_mhz: float | None = None
 
     # Try /proc/net/wireless first for signal (faster, no subprocess)
     try:
@@ -831,7 +834,7 @@ def get_wifi_info(device: str) -> WifiInfo:
     except (OSError, StopIteration, ValueError, IndexError):
         pass
 
-    # Call `iw dev` once to get SSID (and signal if not found above)
+    # Call `iw dev` once to get SSID, freq (and signal if not found above)
     try:
         result = subprocess.run(
             ["iw", "dev", device, "link"],
@@ -845,6 +848,14 @@ def get_wifi_info(device: str) -> WifiInfo:
                 if line.startswith("SSID:"):
                     # Format: "SSID: My Network Name"
                     ssid = line[5:].strip()
+                elif line.startswith("freq:"):
+                    # Format: "freq: 5180" or "freq: 5180.0"
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            freq_mhz = float(parts[1])
+                        except ValueError:
+                            pass
                 elif signal_dbm is None and line.startswith("signal:"):
                     # Format: "signal: -50 dBm"
                     # Only use this if /proc/net/wireless didn't work
@@ -857,7 +868,7 @@ def get_wifi_info(device: str) -> WifiInfo:
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
-    return WifiInfo(signal_dbm=signal_dbm, ssid=ssid)
+    return WifiInfo(signal_dbm=signal_dbm, ssid=ssid, freq_mhz=freq_mhz)
 
 
 def get_ipv4_address(device: str) -> str | None:
@@ -1153,6 +1164,7 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
         "signal": 8,  # "Signal: "
         "ssid": 6,    # "SSID: "
         "ip": 4,      # "IP: "
+        "freq": 6,    # "Freq: "
     }
 
     # Fetch current text values for width calculation
@@ -1167,6 +1179,7 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
             "signal_dbm": None,
             "ssid": None,
             "ip_addr": None,
+            "freq_mhz": None,
         }
 
         if not is_net:
@@ -1176,6 +1189,7 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
             wifi_info = get_wifi_info(device)
             values["signal_dbm"] = wifi_info.signal_dbm
             values["ssid"] = wifi_info.ssid
+            values["freq_mhz"] = wifi_info.freq_mhz
             values["ip_addr"] = get_ipv4_address(device)
 
         device_text_values[device] = values
@@ -1210,6 +1224,8 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
                     value_len = len(values["ssid"])
                 elif text_cfg.type == "ip" and values["ip_addr"] is not None:
                     value_len = len(values["ip_addr"])
+                elif text_cfg.type == "freq" and values["freq_mhz"] is not None:
+                    value_len = 7  # "5.18GHz"
                 else:
                     continue  # no value, skip
 
@@ -1282,6 +1298,7 @@ def render_display(
             "signal_dbm": None,
             "ssid": None,
             "ip_addr": None,
+            "freq_mhz": None,
         }
 
         if not is_net:
@@ -1293,6 +1310,7 @@ def render_display(
             wifi_info = get_wifi_info(device)
             values["signal_dbm"] = wifi_info.signal_dbm
             values["ssid"] = wifi_info.ssid
+            values["freq_mhz"] = wifi_info.freq_mhz
             values["ip_addr"] = get_ipv4_address(device)
 
         device_text_values[device] = values
@@ -1304,6 +1322,7 @@ def render_display(
         "signal": 8,  # "Signal: "
         "ssid": 6,    # "SSID: "
         "ip": 4,      # "IP: "
+        "freq": 6,    # "Freq: "
     }
 
     # Calculate width available per column
@@ -1344,6 +1363,7 @@ def render_display(
             signal_dbm = values["signal_dbm"]
             ssid = values["ssid"]
             ip_addr = values["ip_addr"]
+            freq_mhz = values["freq_mhz"]
 
             # Use per-column text width
             device_width = text_widths[(i + col_idx) % columns]
@@ -1434,6 +1454,12 @@ def render_display(
                     device_col = build_label_value("ssid", "SSID: ", ssid, text_cfg.style)
                 elif text_cfg.type == "ip":
                     device_col = build_label_value("ip", "IP: ", ip_addr, text_cfg.style)
+                elif text_cfg.type == "freq":
+                    freq_str = None
+                    if freq_mhz is not None:
+                        freq_ghz = freq_mhz / 1000
+                        freq_str = f"{freq_ghz:.2f}GHz"
+                    device_col = build_label_value("freq", "Freq: ", freq_str, text_cfg.style)
                 else:
                     device_col = ""
 
