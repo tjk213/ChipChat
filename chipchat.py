@@ -161,6 +161,7 @@ class TextConfig:
     scale: float = 1.0  # for usage: multiply computed capacity by this
     offset: float = 0.0  # for usage: add this to scaled capacity
     label: str | None = None  # custom label (includes colon), None = use default
+    align: str = "right"  # value alignment: "left" or "right"
 
 
 @dataclass
@@ -483,6 +484,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
         - {"usage": {"scale": 1.2, "offset": 5}} -> adjusted = computed * scale + offset
         - {"ssid": {"label": ""}} -> TextConfig with no label (value only)
         - {"signal": {"label": "dBm: "}} -> TextConfig with custom label (include colon if desired)
+        - {"ssid": {"align": "left"}} -> TextConfig with left-aligned value (default is "right")
     """
     # Simple string form
     if isinstance(text_spec, str):
@@ -518,6 +520,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
     scale = 1.0
     offset = 0.0
     label = text_opts.get("label")  # custom label (includes colon), None = use default
+    align = text_opts.get("align", "right")  # value alignment: "left" or "right"
 
     if text_type == "name":
         val = text_opts.get("val", default_name)
@@ -668,7 +671,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
     else:
         thresholds = []
 
-    return TextConfig(type=text_type, thresholds=thresholds, val=val, downsample=downsample, inverted=inverted, style=style, scale=scale, offset=offset, label=label)
+    return TextConfig(type=text_type, thresholds=thresholds, val=val, downsample=downsample, inverted=inverted, style=style, scale=scale, offset=offset, label=label, align=align)
 
 
 def read_diskstats() -> dict[str, DiskStats]:
@@ -1415,19 +1418,24 @@ def render_display(
             # Render each row - meters and text are now aligned by load_config padding
             for row_idx, (meter, text_cfg) in enumerate(zip(cfg.meters, cfg.text)):
                 # Helper to build label with right-justified value
-                def build_label_value(label: str, value: str | None, value_style=None) -> Text:
+                def build_label_value(label: str, value: str | None, value_style=None, align: str = "right") -> Text:
                     prefix = get_label_prefix(len(label))
                     prefix_label_len = len(prefix) + len(label)
                     value_str = value or ""
-                    # Calculate padding to right-justify value within device_width
+                    # Calculate padding for alignment within device_width
                     padding_needed = device_width - prefix_label_len - len(value_str)
                     padding = " " * max(0, padding_needed)
 
                     result = Text(prefix)
                     result.append(label, style="bright_black")
-                    result.append(padding)
-                    if value_str:
-                        result.append(value_str, style=value_style)
+                    if align == "left":
+                        if value_str:
+                            result.append(value_str, style=value_style)
+                        result.append(padding)
+                    else:
+                        result.append(padding)
+                        if value_str:
+                            result.append(value_str, style=value_style)
                     return result
 
                 # Build text column content
@@ -1446,7 +1454,7 @@ def render_display(
                         adjusted_pct = capacity_pct * text_cfg.scale + text_cfg.offset
                         value_style = get_style_for_value(adjusted_pct, text_cfg.thresholds)
                         value_str = f"{adjusted_pct:3.0f}%"
-                    device_col = build_label_value(get_label(text_cfg), value_str, value_style)
+                    device_col = build_label_value(get_label(text_cfg), value_str, value_style, text_cfg.align)
                 elif text_cfg.type == "temp":
                     value_str = None
                     value_style = None
@@ -1457,24 +1465,24 @@ def render_display(
                             value_str = f"{temp_f:3.0f}°F"
                         else:
                             value_str = f"{temp_c:3.0f}°C"
-                    device_col = build_label_value(get_label(text_cfg), value_str, value_style)
+                    device_col = build_label_value(get_label(text_cfg), value_str, value_style, text_cfg.align)
                 elif text_cfg.type == "signal":
                     value_str = None
                     value_style = None
                     if signal_dbm is not None:
                         value_style = get_style_for_value(signal_dbm, text_cfg.thresholds, inverted=text_cfg.inverted)
                         value_str = f"{signal_dbm:3.0f}dBm"
-                    device_col = build_label_value(get_label(text_cfg), value_str, value_style)
+                    device_col = build_label_value(get_label(text_cfg), value_str, value_style, text_cfg.align)
                 elif text_cfg.type == "ssid":
-                    device_col = build_label_value(get_label(text_cfg), ssid, text_cfg.style)
+                    device_col = build_label_value(get_label(text_cfg), ssid, text_cfg.style, text_cfg.align)
                 elif text_cfg.type == "ip":
-                    device_col = build_label_value(get_label(text_cfg), ip_addr, text_cfg.style)
+                    device_col = build_label_value(get_label(text_cfg), ip_addr, text_cfg.style, text_cfg.align)
                 elif text_cfg.type == "freq":
                     freq_str = None
                     if freq_mhz is not None:
                         freq_ghz = freq_mhz / 1000
                         freq_str = f"{freq_ghz:.2f}GHz"
-                    device_col = build_label_value(get_label(text_cfg), freq_str, text_cfg.style)
+                    device_col = build_label_value(get_label(text_cfg), freq_str, text_cfg.style, text_cfg.align)
                 else:
                     device_col = ""
 
