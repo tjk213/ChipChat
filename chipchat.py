@@ -174,6 +174,10 @@ class DiskConfig:
     name: str  # display name
     text_width: int | None  # minimum text column width (None = auto)
 
+    def get_height(self) -> int:
+        """Return the number of rows this device occupies."""
+        return max(len(self.meters), len(self.text))
+
 
 def parse_bandwidth_value(value: str | int | float) -> float | None:
     """Parse bandwidth value with suffix to MB/s.
@@ -1656,6 +1660,31 @@ def render_display(
     return outer_table
 
 
+def compute_display_height(configs: dict[str, DiskConfig], columns: int) -> int:
+    """Compute the total display height in rows.
+
+    Layout:
+        - 1 blank line at top
+        - For each group of devices (grouped by columns):
+            - max(device.get_height()) rows for the tallest device in group
+            - 1 blank line for spacing
+    """
+    devices = list(configs.keys())
+    if not devices:
+        return 0
+
+    height = 1  # blank line at top
+
+    # Process devices in groups of `columns`
+    for i in range(0, len(devices), columns):
+        group = devices[i:i + columns]
+        # Height of this group is the max height among devices in the group
+        group_height = max(configs[device].get_height() for device in group)
+        height += group_height + 1  # +1 for spacing between groups
+
+    return height
+
+
 def parse_meter(meter_spec, device_type: str = "disk") -> MeterConfig:
     """Parse a meter specification into MeterConfig.
 
@@ -1943,6 +1972,11 @@ def main():
         action="store_true",
         help="Display temperatures in Freedom units.",
     )
+    parser.add_argument(
+        "-y", "--height",
+        action="store_true",
+        help="Print the computed display height and exit.",
+    )
 
     args = parser.parse_args()
 
@@ -1952,6 +1986,10 @@ def main():
         return
 
     configs, columns = load_config(args.config)
+
+    if args.height:
+        print(compute_display_height(configs, columns))
+        return
 
     if not configs:
         print("No devices configured. Edit your config file.")
