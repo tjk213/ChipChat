@@ -996,12 +996,11 @@ def get_nic_hwmon_path(device: str) -> Path | None:
     return None
 
 
-def get_nic_temp(device: str) -> float | None:
-    """Get current temperature in Celsius for a network interface.
+def get_hwmon_temp(hwmon: Path | None) -> float | None:
+    """Read temperature in Celsius from a hwmon directory.
 
-    Returns None if the NIC doesn't expose temperature via hwmon.
+    Returns None if hwmon is None or temp1_input doesn't exist.
     """
-    hwmon = get_nic_hwmon_path(device)
     if not hwmon:
         return None
 
@@ -1058,19 +1057,6 @@ def get_nvme_hwmon_path(device: str) -> Path | None:
     return None
 
 
-def get_nvme_temp(device: str) -> float | None:
-    """Get current temperature in Celsius for an NVMe device"""
-    hwmon = get_nvme_hwmon_path(device)
-    if not hwmon:
-        return None
-    try:
-        with open(hwmon / "temp1_input") as f:
-            millidegrees = int(f.read().strip())
-            return millidegrees / 1000.0
-    except (OSError, ValueError):
-        return None
-
-
 def get_sata_temp(device: str) -> float | None:
     """Get current temperature in Celsius for a SATA device via smartctl"""
     try:
@@ -1107,7 +1093,7 @@ def get_sata_temp(device: str) -> float | None:
 def get_disk_temp(device: str) -> float | None:
     """Get temperature for any disk type (NVMe or SATA)"""
     # Try NVMe first (faster, no subprocess)
-    temp = get_nvme_temp(device)
+    temp = get_hwmon_temp(get_nvme_hwmon_path(device))
     if temp is not None:
         return temp
 
@@ -1318,7 +1304,7 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
             values["freq_mhz"] = wifi_info.freq_mhz
             values["ip_addr"] = get_ipv4_address(device)
             values["link_speed"] = get_link_speed(device)
-            values["temp_c"] = get_nic_temp(device)
+            values["temp_c"] = get_hwmon_temp(get_nic_hwmon_path(device))
 
         device_text_values[device] = values
 
@@ -1445,7 +1431,7 @@ def render_display(
             values["ip_addr"] = get_ipv4_address(device)
             values["link_speed"] = get_link_speed(device)
             if temp_downsample > 0 and refresh_counter % temp_downsample == 0:
-                temp_cache[device] = get_nic_temp(device)
+                temp_cache[device] = get_hwmon_temp(get_nic_hwmon_path(device))
             values["temp_c"] = temp_cache.get(device) if temp_downsample > 0 else None
 
         device_text_values[device] = values
