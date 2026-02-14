@@ -499,7 +499,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
     Accepts:
         - "name" -> TextConfig(type="name", val=default_name, ...)
         - "usage" -> TextConfig(type="usage", thresholds=[default usage thresholds]) [disk only]
-        - "temp" -> TextConfig(type="temp", thresholds=[default temp thresholds], downsample=10) [disk only]
+        - "temp" -> TextConfig(type="temp", thresholds=[default temp thresholds], downsample=10)
         - "signal" -> TextConfig(type="signal", thresholds=[default signal thresholds], inverted=True) [net only]
         - "ssid" -> TextConfig(type="ssid", ...) [net only, WiFi SSID]
         - "ip" -> TextConfig(type="ip", ...) [net only, IPv4 address]
@@ -533,7 +533,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
         raise ValueError(f"Invalid text type: {text_type}. Valid: {valid_types}")
 
     # Validate text types for device type
-    disk_only_types = {"temp", "usage"}
+    disk_only_types = {"usage"}
     net_only_types = {"signal", "ssid", "ip", "freq", "link_speed"}
 
     if device_type == "net" and text_type in disk_only_types:
@@ -590,6 +590,14 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
                     Threshold(value=55, style=DEFAULT_THRESHOLD_STYLES[1]),
                     Threshold(value=65, style=DEFAULT_THRESHOLD_STYLES[2]),
                     Threshold(value=75, style=DEFAULT_THRESHOLD_STYLES[3]),
+                ]
+            elif device_type == "net":
+                # NIC temp thresholds
+                thresholds = [
+                    Threshold(value=None, style=DEFAULT_THRESHOLD_STYLES[0]),
+                    Threshold(value=60, style=DEFAULT_THRESHOLD_STYLES[1]),
+                    Threshold(value=70, style=DEFAULT_THRESHOLD_STYLES[2]),
+                    Threshold(value=80, style=DEFAULT_THRESHOLD_STYLES[3]),
                 ]
             else:  # hdd
                 thresholds = [
@@ -968,6 +976,46 @@ def get_link_speed(device: str) -> int | None:
     return None
 
 
+def get_nic_hwmon_path(device: str) -> Path | None:
+    """Find hwmon path for a network interface.
+
+    Some NICs expose temperature via hwmon at /sys/class/net/<device>/device/hwmon/hwmonX/
+    """
+    hwmon_dir = Path(f"/sys/class/net/{device}/device/hwmon")
+    if not hwmon_dir.exists():
+        return None
+
+    # Find first hwmon subdirectory
+    try:
+        for entry in hwmon_dir.iterdir():
+            if entry.is_dir() and entry.name.startswith("hwmon"):
+                return entry
+    except OSError:
+        pass
+
+    return None
+
+
+def get_nic_temp(device: str) -> float | None:
+    """Get current temperature in Celsius for a network interface.
+
+    Returns None if the NIC doesn't expose temperature via hwmon.
+    """
+    hwmon = get_nic_hwmon_path(device)
+    if not hwmon:
+        return None
+
+    try:
+        temp_input = hwmon / "temp1_input"
+        if temp_input.exists():
+            millidegrees = int(temp_input.read_text().strip())
+            return millidegrees / 1000.0
+    except (OSError, ValueError):
+        pass
+
+    return None
+
+
 def get_swap_usage() -> tuple[int, int]:
     """Get swap used and total bytes from /proc/swaps"""
     total = 0
@@ -1270,6 +1318,7 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
             values["freq_mhz"] = wifi_info.freq_mhz
             values["ip_addr"] = get_ipv4_address(device)
             values["link_speed"] = get_link_speed(device)
+            values["temp_c"] = get_nic_temp(device)
 
         device_text_values[device] = values
 
@@ -1395,6 +1444,9 @@ def render_display(
             values["freq_mhz"] = wifi_info.freq_mhz
             values["ip_addr"] = get_ipv4_address(device)
             values["link_speed"] = get_link_speed(device)
+            if temp_downsample > 0 and refresh_counter % temp_downsample == 0:
+                temp_cache[device] = get_nic_temp(device)
+            values["temp_c"] = temp_cache.get(device) if temp_downsample > 0 else None
 
         device_text_values[device] = values
 
