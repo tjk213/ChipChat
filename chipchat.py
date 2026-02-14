@@ -372,6 +372,30 @@ def parse_signal_value(value: str | int | float) -> float:
     return float(value)
 
 
+def parse_link_speed_value(value: str | int | float) -> float:
+    """Parse link speed value in Mbps.
+
+    Accepts:
+        - 1000 -> 1000.0 (Mbps)
+        - "100Mbps" -> 100.0
+        - "1Gbps" -> 1000.0
+        - "10Gbps" -> 10000.0
+    """
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    value = value.strip()
+    lower = value.lower()
+
+    if lower.endswith('gbps'):
+        return float(value[:-4].strip()) * 1000
+    elif lower.endswith('mbps'):
+        return float(value[:-4].strip())
+    else:
+        # Assume raw number in Mbps
+        return float(value)
+
+
 def parse_style(style_spec) -> str:
     """Parse style specification to Rich style string.
 
@@ -534,7 +558,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
         downsample = text_opts.get("downsample", 10)  # default: poll every 10 refreshes
     elif text_type == "signal":
         inverted = True  # lower dBm values are worse
-    elif text_type in ("ssid", "ip", "freq", "link_speed"):
+    elif text_type in ("ssid", "ip", "freq"):
         style = text_opts.get("style", "blue")
     elif text_type == "usage":
         scale = float(text_opts.get("scale", 1.0))
@@ -672,6 +696,22 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
                 Threshold(value=-50, style=DEFAULT_THRESHOLD_STYLES[1]),
                 Threshold(value=-60, style=DEFAULT_THRESHOLD_STYLES[2]),
                 Threshold(value=-70, style=DEFAULT_THRESHOLD_STYLES[3]),
+            ]
+    elif text_type == "link_speed":
+        thresholds_raw = text_opts.get("thresholds")
+        if thresholds_raw:
+            thresholds = parse_thresholds(thresholds_raw, parse_link_speed_value)
+        else:
+            # Default link speed thresholds in Mbps (higher is better)
+            # >= 10Gbps = green (excellent)
+            # >= 1Gbps = yellow (good)
+            # >= 100Mbps = red (slow)
+            # < 100Mbps = red blink (misconfigured)
+            thresholds = [
+                Threshold(value=None, style=DEFAULT_THRESHOLD_STYLES[3]),
+                Threshold(value=100, style=DEFAULT_THRESHOLD_STYLES[2]),
+                Threshold(value=1000, style=DEFAULT_THRESHOLD_STYLES[1]),
+                Threshold(value=10000, style=DEFAULT_THRESHOLD_STYLES[0]),
             ]
     else:
         thresholds = []
@@ -1517,12 +1557,14 @@ def render_display(
                     device_col = build_label_value(get_label(text_cfg), freq_str, text_cfg.style, text_cfg.align)
                 elif text_cfg.type == "link_speed":
                     speed_str = None
+                    value_style = None
                     if link_speed is not None:
+                        value_style = get_style_for_value(link_speed, text_cfg.thresholds)
                         if link_speed >= 1000:
                             speed_str = f"{link_speed // 1000}Gbps"
                         else:
                             speed_str = f"{link_speed}Mbps"
-                    device_col = build_label_value(get_label(text_cfg), speed_str, text_cfg.style, text_cfg.align)
+                    device_col = build_label_value(get_label(text_cfg), speed_str, value_style, text_cfg.align)
                 else:
                     device_col = ""
 
