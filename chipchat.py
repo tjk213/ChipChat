@@ -295,13 +295,13 @@ def parse_time_value(value: str | int | float | None) -> float | None:
     return num * multipliers[unit]
 
 
-def parse_temp_value(value: str | int | float, device: str | None = None) -> tuple[float, str]:
+def parse_temp_value(value: str | int | float, device: str | None = None, device_type: str | None = None) -> tuple[float, str]:
     """Parse temperature value with suffix to (celsius, unit).
 
     Accepts:
         - "33C" -> (33.0, "c")
         - "125F" -> (51.67, "c")  # converted to Celsius internally
-        - "80%" -> (percentage of critical temp, "c")  # NVMe only
+        - "80%" -> (percentage of critical temp, "c")  # requires device and device_type
         - integer/float -> (value as Celsius, "c")
 
     Returns tuple of (value_in_celsius, original_unit).
@@ -311,11 +311,12 @@ def parse_temp_value(value: str | int | float, device: str | None = None) -> tup
 
     value = value.strip()
 
-    # Check for percentage (NVMe critical temp)
+    # Check for percentage (critical temp)
     if value.endswith('%'):
         pct = float(value[:-1])
         # Get critical temp for device
-        critical_temp = get_nvme_critical_temp(device) if device else None
+        hwmon = get_device_hwmon_path(device, device_type) if device and device_type else None
+        critical_temp = get_hwmon_critical_temp(hwmon)
         if critical_temp is None:
             raise ValueError(f"Cannot use % threshold - no critical temp found for {device}")
         return (critical_temp * pct / 100, "c")
@@ -430,6 +431,7 @@ def parse_thresholds(
     thresholds_spec,
     value_parser,
     device: str | None = None,
+    device_type: str | None = None,
 ) -> list[Threshold]:
     """Parse threshold specification into list of Threshold objects.
 
@@ -463,7 +465,7 @@ def parse_thresholds(
             if val_raw is None:
                 val = None
             elif device and value_parser == parse_temp_value:
-                val, _ = value_parser(val_raw, device)
+                val, _ = value_parser(val_raw, device, device_type)
             elif value_parser == parse_temp_value:
                 val, _ = value_parser(val_raw)
             else:
@@ -476,7 +478,7 @@ def parse_thresholds(
             if item is None:
                 val = None
             elif device and value_parser == parse_temp_value:
-                val, _ = value_parser(item, device)
+                val, _ = value_parser(item, device, device_type)
             elif value_parser == parse_temp_value:
                 val, _ = value_parser(item)
             else:
@@ -572,10 +574,11 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
     if text_type == "temp":
         thresholds_raw = text_opts.get("thresholds")
         if thresholds_raw:
-            thresholds = parse_thresholds(thresholds_raw, parse_temp_value, device)
+            thresholds = parse_thresholds(thresholds_raw, parse_temp_value, device, device_type)
         else:
             # Default temp thresholds - try hwmon critical temp first
-            critical_temp = get_nvme_critical_temp(device) if device else None
+            hwmon = get_device_hwmon_path(device, device_type) if device else None
+            critical_temp = get_hwmon_critical_temp(hwmon)
             if critical_temp is not None:
                 # Use percentage of critical temp
                 thresholds = [
@@ -1101,9 +1104,8 @@ def get_disk_temp(device: str) -> float | None:
     return get_sata_temp(device)
 
 
-def get_nvme_temp_thresholds(device: str) -> tuple[float | None, float | None]:
-    """Get max (warning) and critical temperature thresholds for an NVMe device"""
-    hwmon = get_nvme_hwmon_path(device)
+def get_hwmon_temp_thresholds(hwmon: Path | None) -> tuple[float | None, float | None]:
+    """Get max (warning) and critical temperature thresholds from a hwmon directory"""
     if not hwmon:
         return None, None
 
@@ -1111,24 +1113,34 @@ def get_nvme_temp_thresholds(device: str) -> tuple[float | None, float | None]:
     crit_temp = None
 
     try:
-        with open(hwmon / "temp1_max") as f:
-            max_temp = int(f.read().strip()) / 1000.0
+        max_path = hwmon / "temp1_max"
+        if max_path.exists():
+            max_temp = int(max_path.read_text().strip()) / 1000.0
     except (OSError, ValueError):
         pass
 
     try:
-        with open(hwmon / "temp1_crit") as f:
-            crit_temp = int(f.read().strip()) / 1000.0
+        crit_path = hwmon / "temp1_crit"
+        if crit_path.exists():
+            crit_temp = int(crit_path.read_text().strip()) / 1000.0
     except (OSError, ValueError):
         pass
 
     return max_temp, crit_temp
 
 
-def get_nvme_critical_temp(device: str) -> float | None:
-    """Get critical temperature threshold for an NVMe device"""
-    _, crit_temp = get_nvme_temp_thresholds(device)
+def get_hwmon_critical_temp(hwmon: Path | None) -> float | None:
+    """Get critical temperature threshold from a hwmon directory"""
+    _, crit_temp = get_hwmon_temp_thresholds(hwmon)
     return crit_temp
+
+
+def get_device_hwmon_path(device: str, device_type: str) -> Path | None:
+    """Get hwmon path for a device based on its type"""
+    if device_type == "net":
+        return get_nic_hwmon_path(device)
+    else:
+        return get_nvme_hwmon_path(device)
 
 
 def get_style_for_value(value: float, thresholds: list[Threshold], inverted: bool = False) -> Style:
