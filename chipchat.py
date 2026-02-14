@@ -1283,7 +1283,7 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
         "ssid": "SSID: ",
         "ip": "IP: ",
         "freq": "Freq: ",
-        "link_speed": "Link Speed: ",
+        "link_speed": "Link: ",
     }
 
     def get_label(text_cfg: TextConfig) -> str:
@@ -1458,7 +1458,7 @@ def render_display(
         "ssid": "SSID: ",
         "ip": "IP: ",
         "freq": "Freq: ",
-        "link_speed": "Link Speed: ",
+        "link_speed": "Link: ",
     }
 
     def get_label(text_cfg: TextConfig) -> str:
