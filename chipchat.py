@@ -152,7 +152,7 @@ class Threshold:
 @dataclass
 class TextConfig:
     """Per-text-element configuration"""
-    type: str  # "name", "temp", "usage", "signal", "ssid", "ip", "freq", "blank"
+    type: str  # "name", "temp", "usage", "signal", "ssid", "ip", "freq", "link_speed", "blank"
     thresholds: list[Threshold]  # ordered list of thresholds
     val: str | None  # for name: display value
     downsample: int  # for temp: poll every N refreshes (0 = disable)
@@ -480,6 +480,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
         - "ssid" -> TextConfig(type="ssid", ...) [net only, WiFi SSID]
         - "ip" -> TextConfig(type="ip", ...) [net only, IPv4 address]
         - "freq" -> TextConfig(type="freq", ...) [net only, WiFi frequency in GHz]
+        - "link_speed" -> TextConfig(type="link_speed", ...) [net only, link speed in Mbps/Gbps]
         - "blank" -> TextConfig(type="blank", ...)
         - {"name": {"val": "Custom Name", "style": "cyan"}} -> TextConfig with custom name and style
         - {"ssid": {"style": "green"}} -> TextConfig with custom style
@@ -503,13 +504,13 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
     else:
         raise ValueError(f"Invalid text spec: {text_spec}")
 
-    valid_types = {"name", "temp", "usage", "signal", "ssid", "ip", "freq", "blank"}
+    valid_types = {"name", "temp", "usage", "signal", "ssid", "ip", "freq", "link_speed", "blank"}
     if text_type not in valid_types:
         raise ValueError(f"Invalid text type: {text_type}. Valid: {valid_types}")
 
     # Validate text types for device type
     disk_only_types = {"temp", "usage"}
-    net_only_types = {"signal", "ssid", "ip", "freq"}
+    net_only_types = {"signal", "ssid", "ip", "freq", "link_speed"}
 
     if device_type == "net" and text_type in disk_only_types:
         raise ValueError(f"Text type '{text_type}' not valid for net devices")
@@ -533,7 +534,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
         downsample = text_opts.get("downsample", 10)  # default: poll every 10 refreshes
     elif text_type == "signal":
         inverted = True  # lower dBm values are worse
-    elif text_type in ("ssid", "ip", "freq"):
+    elif text_type in ("ssid", "ip", "freq", "link_speed"):
         style = text_opts.get("style", "blue")
     elif text_type == "usage":
         scale = float(text_opts.get("scale", 1.0))
@@ -909,6 +910,24 @@ def get_ipv4_address(device: str) -> str | None:
     return None
 
 
+def get_link_speed(device: str) -> int | None:
+    """Get link speed for a network interface in Mbps.
+
+    Returns None if speed is unavailable (e.g., link down, virtual interface).
+    """
+    try:
+        speed_path = Path(f"/sys/class/net/{device}/speed")
+        if speed_path.exists():
+            speed = int(speed_path.read_text().strip())
+            # -1 means speed is unknown (link down or not applicable)
+            if speed > 0:
+                return speed
+    except (ValueError, OSError):
+        pass
+
+    return None
+
+
 def get_swap_usage() -> tuple[int, int]:
     """Get swap used and total bytes from /proc/swaps"""
     total = 0
@@ -1176,6 +1195,7 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
         "ssid": "SSID: ",
         "ip": "IP: ",
         "freq": "Freq: ",
+        "link_speed": "Link Speed: ",
     }
 
     def get_label(text_cfg: TextConfig) -> str:
@@ -1197,6 +1217,7 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
             "ssid": None,
             "ip_addr": None,
             "freq_mhz": None,
+            "link_speed": None,
         }
 
         if not is_net:
@@ -1208,6 +1229,7 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
             values["ssid"] = wifi_info.ssid
             values["freq_mhz"] = wifi_info.freq_mhz
             values["ip_addr"] = get_ipv4_address(device)
+            values["link_speed"] = get_link_speed(device)
 
         device_text_values[device] = values
 
@@ -1243,6 +1265,8 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
                     value_len = len(values["ip_addr"])
                 elif text_cfg.type == "freq" and values["freq_mhz"] is not None:
                     value_len = 7  # "5.18GHz"
+                elif text_cfg.type == "link_speed" and values["link_speed"] is not None:
+                    value_len = 7  # "10Gbps"
                 else:
                     continue  # no value, skip
 
@@ -1316,6 +1340,7 @@ def render_display(
             "ssid": None,
             "ip_addr": None,
             "freq_mhz": None,
+            "link_speed": None,
         }
 
         if not is_net:
@@ -1329,6 +1354,7 @@ def render_display(
             values["ssid"] = wifi_info.ssid
             values["freq_mhz"] = wifi_info.freq_mhz
             values["ip_addr"] = get_ipv4_address(device)
+            values["link_speed"] = get_link_speed(device)
 
         device_text_values[device] = values
 
@@ -1340,6 +1366,7 @@ def render_display(
         "ssid": "SSID: ",
         "ip": "IP: ",
         "freq": "Freq: ",
+        "link_speed": "Link Speed: ",
     }
 
     def get_label(text_cfg: TextConfig) -> str:
@@ -1387,6 +1414,7 @@ def render_display(
             ssid = values["ssid"]
             ip_addr = values["ip_addr"]
             freq_mhz = values["freq_mhz"]
+            link_speed = values["link_speed"]
 
             # Use per-column text width
             device_width = text_widths[(i + col_idx) % columns]
@@ -1487,6 +1515,14 @@ def render_display(
                         freq_ghz = freq_mhz / 1000
                         freq_str = f"{freq_ghz:.2f}GHz"
                     device_col = build_label_value(get_label(text_cfg), freq_str, text_cfg.style, text_cfg.align)
+                elif text_cfg.type == "link_speed":
+                    speed_str = None
+                    if link_speed is not None:
+                        if link_speed >= 1000:
+                            speed_str = f"{link_speed // 1000}Gbps"
+                        else:
+                            speed_str = f"{link_speed}Mbps"
+                    device_col = build_label_value(get_label(text_cfg), speed_str, text_cfg.style, text_cfg.align)
                 else:
                     device_col = ""
 
