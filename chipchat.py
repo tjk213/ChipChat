@@ -1411,22 +1411,24 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
                 label_len = len(label)
                 prefix_len = max_label_len + 2 - label_len
 
-                if text_cfg.type == "usage" and values["capacity_pct"] is not None:
+                if text_cfg.type == "usage":
                     value_len = 4  # "100%"
-                elif text_cfg.type == "temp" and values["temp_c"] is not None:
+                elif text_cfg.type == "temp":
                     value_len = 5  # "100°F"
-                elif text_cfg.type == "signal" and values["signal_dbm"] is not None:
+                elif text_cfg.type == "signal":
                     value_len = 7  # "-100dBm"
-                elif text_cfg.type == "ssid" and values["ssid"] is not None:
-                    value_len = len(values["ssid"])
-                elif text_cfg.type == "ip" and values["ip_addr"] is not None:
-                    value_len = len(values["ip_addr"])
-                elif text_cfg.type == "freq" and values["freq_mhz"] is not None:
+                elif text_cfg.type == "ssid":
+                    ssid = values["ssid"]
+                    value_len = len(ssid) if ssid else 15
+                elif text_cfg.type == "ip":
+                    ip_addr = values["ip_addr"]
+                    value_len = len(ip_addr) if ip_addr else 15 # 255.255.255.255
+                elif text_cfg.type == "freq":
                     value_len = 7  # "5.18GHz"
-                elif text_cfg.type == "link_speed" and values["link_speed"] is not None:
+                elif text_cfg.type == "link_speed":
                     value_len = 7  # "10Gbps"
                 else:
-                    continue  # no value, skip
+                    value_len = 0
 
                 width = prefix_len + label_len + value_len
             else:
