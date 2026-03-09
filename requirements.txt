@@ -11,7 +11,7 @@
 ##           Copyright © 2026 Tyler J. Kenney. All rights reserved.           ##
 ## ○════════════════════════════════════════════════════════════════════════○ ##
 
-pyyaml
+pyyaml==6.0.3
 
 # There looks to be a bug regarding the overflow=ellipsis setting in rich 14.3.
 # It adds an ellipsis even when the column content fits perfectly.
