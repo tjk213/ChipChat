@@ -1037,6 +1037,16 @@ def get_link_speed(device: str) -> int | None:
 
     Returns None if speed is unavailable (e.g., link down, virtual interface).
     """
+    if platform.system() == "Linux":
+        return _get_link_speed_linux(device)
+    elif platform.system() in ("FreeBSD", "Darwin"):
+        return _get_link_speed_bsd(device)
+    else:
+        return None
+
+
+def _get_link_speed_linux(device: str) -> int | None:
+    """Get link speed from /sys/class/net (Linux)"""
     try:
         speed_path = Path(f"/sys/class/net/{device}/speed")
         if speed_path.exists():
@@ -1045,6 +1055,39 @@ def get_link_speed(device: str) -> int | None:
             if speed > 0:
                 return speed
     except (ValueError, OSError):
+        pass
+
+    return None
+
+
+def _get_link_speed_bsd(device: str) -> int | None:
+    """Get link speed from ifconfig media line (FreeBSD/macOS)
+
+    Parses lines like:
+        media: Ethernet autoselect (1000baseT <full-duplex>)
+        media: Ethernet autoselect (10Gbase-T <full-duplex>)
+    """
+    try:
+        result = subprocess.run(
+            ["ifconfig", device],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return None
+
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("media:"):
+                # Extract speed from patterns like 1000baseT, 10Gbase-T, 100baseTX
+                match = re.search(r'(\d+)(G)?base', line, re.IGNORECASE)
+                if match:
+                    speed = int(match.group(1))
+                    if match.group(2):  # 'G' suffix means gigabit
+                        speed *= 1000
+                    return speed
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
     return None
