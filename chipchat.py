@@ -20,6 +20,7 @@ ChipChat - I/O monitor with meters for disks and network interfaces
 """
 
 import glob
+import platform
 import re
 import subprocess
 import time
@@ -729,8 +730,13 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
 
     return TextConfig(type=text_type, thresholds=thresholds, val=val, downsample=downsample, inverted=inverted, style=style, scale=scale, offset=offset, label=label, align=align)
 
-
 def read_diskstats() -> dict[str, DiskStats]:
+    """Read diskstats using appropriate method for the detected OS"""
+    if platform.system() == "Linux":
+        return _read_diskstats_linux()
+    return {} # Unknown OS
+
+def _read_diskstats_linux() -> dict[str, DiskStats]:
     """Read current stats from /proc/diskstats"""
     stats = {}
     timestamp = time.time()
