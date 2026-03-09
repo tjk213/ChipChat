@@ -1010,6 +1010,16 @@ def get_ipv4_address(device: str) -> str | None:
 
     Returns None if device has no IPv4 address assigned.
     """
+    if platform.system() == "Linux":
+        return _get_ipv4_address_linux(device)
+    elif platform.system() in ("FreeBSD", "Darwin"):
+        return _get_ipv4_address_bsd(device)
+    else:
+        return None
+
+
+def _get_ipv4_address_linux(device: str) -> str | None:
+    """Get IPv4 address using ip command (Linux)"""
     try:
         result = subprocess.run(
             ["ip", "-4", "addr", "show", device],
@@ -1026,6 +1036,35 @@ def get_ipv4_address(device: str) -> str | None:
                     if len(parts) >= 2:
                         # Return just the IP, not the CIDR suffix
                         return parts[1].split('/')[0]
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    return None
+
+
+def _get_ipv4_address_bsd(device: str) -> str | None:
+    """Get IPv4 address from ifconfig (FreeBSD/macOS)
+
+    Parses lines like:
+        inet 10.0.0.216 netmask 0xffffff00 broadcast 10.0.0.255
+    """
+    try:
+        result = subprocess.run(
+            ["ifconfig", device],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return None
+
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("inet "):
+                # Format: "inet 10.0.0.216 netmask ..."
+                parts = line.split()
+                if len(parts) >= 2:
+                    return parts[1]
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
