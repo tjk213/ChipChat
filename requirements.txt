@@ -12,4 +12,8 @@
 ## ○════════════════════════════════════════════════════════════════════════○ ##
 
 pyyaml
-rich
+
+# There looks to be a bug regarding the overflow=ellipsis setting in rich 14.3.
+# It adds an ellipsis even when the column content fits perfectly.
+# So for now, pin to 14.2.
+rich==14.2
