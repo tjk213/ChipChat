@@ -808,7 +808,17 @@ def compute_metrics(
 
 
 def read_netstats() -> dict[str, NetStats]:
-    """Read current stats from /sys/class/net/*/statistics/"""
+    """Read current network stats (cross-platform)"""
+    if platform.system() == "Linux":
+        return _read_netstats_linux()
+    elif platform.system() in ("FreeBSD", "Darwin"):
+        return _read_netstats_bsd()
+    else:
+        return {}
+
+
+def _read_netstats_linux() -> dict[str, NetStats]:
+    """Read stats from /sys/class/net/*/statistics/"""
     stats = {}
     timestamp = time.time()
 
@@ -837,6 +847,61 @@ def read_netstats() -> dict[str, NetStats]:
                 timestamp=timestamp,
             )
         except (OSError, ValueError):
+            continue
+
+    return stats
+
+
+def _read_netstats_bsd() -> dict[str, NetStats]:
+    """Read stats from netstat -ibn (FreeBSD/macOS)"""
+    stats = {}
+    timestamp = time.time()
+
+    result = subprocess.run(
+        ["netstat", "-ibn"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        return stats
+
+    lines = result.stdout.strip().split('\n')
+    if not lines:
+        return stats
+
+    # Parse header to find column indices
+    header = lines[0].split()
+    try:
+        name_idx = header.index("Name")
+        ipkts_idx = header.index("Ipkts")
+        ibytes_idx = header.index("Ibytes")
+        opkts_idx = header.index("Opkts")
+        obytes_idx = header.index("Obytes")
+    except ValueError:
+        # Fallback positions for FreeBSD
+        name_idx, ipkts_idx, ibytes_idx, opkts_idx, obytes_idx = 0, 4, 6, 7, 9
+
+    for line in lines[1:]:
+        parts = line.split()
+        if len(parts) <= max(name_idx, ipkts_idx, ibytes_idx, opkts_idx, obytes_idx):
+            continue
+
+        iface = parts[name_idx].rstrip('*')
+
+        # Skip duplicate entries (netstat shows one line per address)
+        if iface in stats:
+            continue
+
+        try:
+            stats[iface] = NetStats(
+                rx_bytes=int(parts[ibytes_idx]),
+                tx_bytes=int(parts[obytes_idx]),
+                rx_packets=int(parts[ipkts_idx]),
+                tx_packets=int(parts[opkts_idx]),
+                timestamp=timestamp,
+            )
+        except (ValueError, IndexError):
             continue
 
     return stats
