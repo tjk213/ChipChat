@@ -1014,8 +1014,15 @@ def _get_wifi_info_linux(device: str) -> WifiInfo:
     return WifiInfo(signal_dbm=signal_dbm, ssid=ssid, freq_mhz=freq_mhz)
 
 
+# Cache for macOS system_profiler results (it's slow)
+_macos_wifi_cache: dict = {}
+_MACOS_WIFI_CACHE_TTL = 60.0  # seconds
+
+
 def _get_wifi_info_macos(device: str) -> WifiInfo:
     """Get WiFi info using system_profiler (macOS)
+
+    Results are cached for 60 seconds since system_profiler is slow.
 
     Parses output like:
         Current Network Information:
@@ -1024,6 +1031,13 @@ def _get_wifi_info_macos(device: str) -> WifiInfo:
               Channel: 100 (5GHz, 80MHz)
               Signal / Noise: -38 dBm / -86 dBm
     """
+    # Check cache
+    now = time.time()
+    if device in _macos_wifi_cache:
+        cached_time, cached_info = _macos_wifi_cache[device]
+        if now - cached_time < _MACOS_WIFI_CACHE_TTL:
+            return cached_info
+
     signal_dbm: float | None = None
     ssid: str | None = None
     freq_mhz: float | None = None
@@ -1072,7 +1086,9 @@ def _get_wifi_info_macos(device: str) -> WifiInfo:
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
-    return WifiInfo(signal_dbm=signal_dbm, ssid=ssid, freq_mhz=freq_mhz)
+    info = WifiInfo(signal_dbm=signal_dbm, ssid=ssid, freq_mhz=freq_mhz)
+    _macos_wifi_cache[device] = (now, info)
+    return info
 
 
 def _get_wifi_info_freebsd(device: str) -> WifiInfo:
@@ -1272,7 +1288,15 @@ def _get_link_speed_macos(device: str) -> int | None:
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
-    # Fall back to system_profiler for WiFi
+    # Fall back to system_profiler for WiFi (with caching)
+    now = time.time()
+    cache_key = f"link_speed:{device}"
+    if cache_key in _macos_wifi_cache:
+        cached_time, cached_speed = _macos_wifi_cache[cache_key]
+        if now - cached_time < _MACOS_WIFI_CACHE_TTL:
+            return cached_speed
+
+    link_speed: int | None = None
     try:
         result = subprocess.run(
             ["system_profiler", "SPAirPortDataType"],
@@ -1293,7 +1317,8 @@ def _get_link_speed_macos(device: str) -> int | None:
                         parts = stripped.split(":")
                         if len(parts) >= 2:
                             try:
-                                return int(parts[1].strip())
+                                link_speed = int(parts[1].strip())
+                                break
                             except ValueError:
                                 pass
                     # Stop at next section
@@ -1302,7 +1327,8 @@ def _get_link_speed_macos(device: str) -> int | None:
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
-    return None
+    _macos_wifi_cache[cache_key] = (now, link_speed)
+    return link_speed
 
 
 def get_nic_hwmon_path(device: str) -> Path | None:
