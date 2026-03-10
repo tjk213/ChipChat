@@ -1648,6 +1648,9 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
         cfg = configs[device]
         is_net = cfg.type == "net"
 
+        # Determine which text types are configured
+        text_types = {t.type for t in cfg.text}
+
         values: dict = {
             "capacity_pct": None,
             "temp_c": None,
@@ -1662,13 +1665,18 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
             values["capacity_pct"] = get_capacity_pct(device, cfg.mount_points)
             values["temp_c"] = get_disk_temp(device)
         else:
-            wifi_info = get_wifi_info(device)
-            values["signal_dbm"] = wifi_info.signal_dbm
-            values["ssid"] = wifi_info.ssid
-            values["freq_mhz"] = wifi_info.freq_mhz
-            values["ip_addr"] = get_ipv4_address(device)
-            values["link_speed"] = get_link_speed(device)
-            values["temp_c"] = get_hwmon_temp(get_nic_hwmon_path(device))
+            # Only call get_wifi_info if any wifi text types are configured
+            if text_types & {"signal", "ssid", "freq"}:
+                wifi_info = get_wifi_info(device)
+                values["signal_dbm"] = wifi_info.signal_dbm
+                values["ssid"] = wifi_info.ssid
+                values["freq_mhz"] = wifi_info.freq_mhz
+            if "ip" in text_types:
+                values["ip_addr"] = get_ipv4_address(device)
+            if "link_speed" in text_types:
+                values["link_speed"] = get_link_speed(device)
+            if "temp" in text_types:
+                values["temp_c"] = get_hwmon_temp(get_nic_hwmon_path(device))
 
         device_text_values[device] = values
 
@@ -1774,6 +1782,9 @@ def render_display(
         is_net = cfg.type == "net"
         temp_downsample = get_temp_downsample(cfg)
 
+        # Determine which text types are configured
+        text_types = {t.type for t in cfg.text}
+
         values: dict = {
             "capacity_pct": None,
             "temp_c": None,
@@ -1790,12 +1801,16 @@ def render_display(
                 temp_cache[device] = get_disk_temp(device)
             values["temp_c"] = temp_cache.get(device) if temp_downsample > 0 else None
         else:
-            wifi_info = get_wifi_info(device)
-            values["signal_dbm"] = wifi_info.signal_dbm
-            values["ssid"] = wifi_info.ssid
-            values["freq_mhz"] = wifi_info.freq_mhz
-            values["ip_addr"] = get_ipv4_address(device)
-            values["link_speed"] = get_link_speed(device)
+            # Only call get_wifi_info if any wifi text types are configured
+            if text_types & {"signal", "ssid", "freq"}:
+                wifi_info = get_wifi_info(device)
+                values["signal_dbm"] = wifi_info.signal_dbm
+                values["ssid"] = wifi_info.ssid
+                values["freq_mhz"] = wifi_info.freq_mhz
+            if "ip" in text_types:
+                values["ip_addr"] = get_ipv4_address(device)
+            if "link_speed" in text_types:
+                values["link_speed"] = get_link_speed(device)
             if temp_downsample > 0 and refresh_counter % temp_downsample == 0:
                 temp_cache[device] = get_hwmon_temp(get_nic_hwmon_path(device))
             values["temp_c"] = temp_cache.get(device) if temp_downsample > 0 else None
