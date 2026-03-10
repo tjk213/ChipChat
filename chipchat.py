@@ -1044,7 +1044,7 @@ def _get_wifi_info_macos(device: str) -> WifiInfo:
 
     try:
         result = subprocess.run(
-            ["system_profiler", "SPAirPortDataType"],
+            ["system_profiler", "SPAirPortDataType", "-detailLevel", "basic"],
             capture_output=True,
             text=True,
             timeout=5,
