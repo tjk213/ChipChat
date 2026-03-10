@@ -937,13 +937,22 @@ def compute_net_metrics(prev: NetStats, curr: NetStats) -> NetMetrics:
 
 
 def get_wifi_info(device: str) -> WifiInfo:
-    """Get WiFi signal strength, SSID, and frequency with a single iw call.
-
-    Tries /proc/net/wireless first for signal (faster, no subprocess),
-    falls back to `iw dev` for newer drivers that don't populate /proc/net/wireless.
+    """Get WiFi signal strength, SSID, and frequency.
 
     Returns WifiInfo with signal_dbm, ssid, and freq_mhz (any may be None if not available).
     """
+    if platform.system() == "Linux":
+        return _get_wifi_info_linux(device)
+    elif platform.system() == "Darwin":
+        return _get_wifi_info_macos(device)
+    elif platform.system() == "FreeBSD":
+        return _get_wifi_info_freebsd(device)
+    else:
+        return WifiInfo(signal_dbm=None, ssid=None, freq_mhz=None)
+
+
+def _get_wifi_info_linux(device: str) -> WifiInfo:
+    """Get WiFi info using /proc/net/wireless and iw (Linux)"""
     signal_dbm: float | None = None
     ssid: str | None = None
     freq_mhz: float | None = None
@@ -999,6 +1008,107 @@ def get_wifi_info(device: str) -> WifiInfo:
                             signal_dbm = float(parts[1])
                         except ValueError:
                             pass
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    return WifiInfo(signal_dbm=signal_dbm, ssid=ssid, freq_mhz=freq_mhz)
+
+
+def _get_wifi_info_macos(device: str) -> WifiInfo:
+    """Get WiFi info using system_profiler (macOS)
+
+    Parses output like:
+        Current Network Information:
+            Isle of Faces:
+              PHY Mode: 802.11ax
+              Channel: 100 (5GHz, 80MHz)
+              Signal / Noise: -38 dBm / -86 dBm
+    """
+    signal_dbm: float | None = None
+    ssid: str | None = None
+    freq_mhz: float | None = None
+
+    try:
+        result = subprocess.run(
+            ["system_profiler", "SPAirPortDataType"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return WifiInfo(signal_dbm=None, ssid=None, freq_mhz=None)
+
+        in_current_network = False
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+
+            if "Current Network Information:" in line:
+                in_current_network = True
+                continue
+
+            if in_current_network:
+                # SSID is the first indented key after "Current Network Information:"
+                # It appears as "          NetworkName:" with extra indentation
+                if ssid is None and stripped.endswith(":") and not stripped.startswith(("PHY", "Channel", "Country", "Network", "Security", "Signal", "Transmit", "MCS")):
+                    ssid = stripped.rstrip(":")
+
+                # Parse "Signal / Noise: -38 dBm / -86 dBm"
+                elif stripped.startswith("Signal / Noise:"):
+                    match = re.search(r'(-?\d+)\s*dBm', stripped)
+                    if match:
+                        signal_dbm = float(match.group(1))
+
+                # Parse "Channel: 100 (5GHz, 80MHz)" or "Channel: 6 (2.4GHz)"
+                elif stripped.startswith("Channel:"):
+                    # Extract frequency from parentheses
+                    match = re.search(r'\((\d+(?:\.\d+)?)\s*GHz', stripped)
+                    if match:
+                        freq_mhz = float(match.group(1)) * 1000
+
+                # Stop if we hit another section
+                elif line and not line.startswith(" ") and ":" in line:
+                    break
+
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    return WifiInfo(signal_dbm=signal_dbm, ssid=ssid, freq_mhz=freq_mhz)
+
+
+def _get_wifi_info_freebsd(device: str) -> WifiInfo:
+    """Get WiFi info using ifconfig (FreeBSD)
+
+    Parses output like:
+        ssid MyNetwork
+        channel 36 (5180 MHz 11a ht/40+)
+    """
+    signal_dbm: float | None = None
+    ssid: str | None = None
+    freq_mhz: float | None = None
+
+    try:
+        result = subprocess.run(
+            ["ifconfig", device],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return WifiInfo(signal_dbm=None, ssid=None, freq_mhz=None)
+
+        for line in result.stdout.splitlines():
+            line = line.strip()
+
+            # Parse "ssid MyNetwork"
+            if line.startswith("ssid "):
+                ssid = line[5:].strip()
+
+            # Parse "channel 36 (5180 MHz ...)"
+            elif line.startswith("channel "):
+                match = re.search(r'\((\d+)\s*MHz', line)
+                if match:
+                    freq_mhz = float(match.group(1))
+
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
@@ -1078,8 +1188,10 @@ def get_link_speed(device: str) -> int | None:
     """
     if platform.system() == "Linux":
         return _get_link_speed_linux(device)
-    elif platform.system() in ("FreeBSD", "Darwin"):
-        return _get_link_speed_bsd(device)
+    elif platform.system() == "FreeBSD":
+        return _get_link_speed_freebsd(device)
+    elif platform.system() == "Darwin":
+        return _get_link_speed_macos(device)
     else:
         return None
 
@@ -1099,8 +1211,8 @@ def _get_link_speed_linux(device: str) -> int | None:
     return None
 
 
-def _get_link_speed_bsd(device: str) -> int | None:
-    """Get link speed from ifconfig media line (FreeBSD/macOS)
+def _get_link_speed_freebsd(device: str) -> int | None:
+    """Get link speed from ifconfig media line (FreeBSD)
 
     Parses lines like:
         media: Ethernet autoselect (1000baseT <full-duplex>)
@@ -1126,6 +1238,67 @@ def _get_link_speed_bsd(device: str) -> int | None:
                     if match.group(2):  # 'G' suffix means gigabit
                         speed *= 1000
                     return speed
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    return None
+
+
+def _get_link_speed_macos(device: str) -> int | None:
+    """Get link speed on macOS
+
+    For wired interfaces: parse ifconfig media line
+    For WiFi: parse system_profiler Transmit Rate
+    """
+    # Try ifconfig first (works for wired interfaces)
+    try:
+        result = subprocess.run(
+            ["ifconfig", device],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("media:"):
+                    # Extract speed from patterns like 1000baseT, 10Gbase-T
+                    match = re.search(r'(\d+)(G)?base', line, re.IGNORECASE)
+                    if match:
+                        speed = int(match.group(1))
+                        if match.group(2):
+                            speed *= 1000
+                        return speed
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    # Fall back to system_profiler for WiFi
+    try:
+        result = subprocess.run(
+            ["system_profiler", "SPAirPortDataType"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            in_current_network = False
+            for line in result.stdout.splitlines():
+                if "Current Network Information:" in line:
+                    in_current_network = True
+                    continue
+                if in_current_network:
+                    stripped = line.strip()
+                    # Parse "Transmit Rate: 1200"
+                    if stripped.startswith("Transmit Rate:"):
+                        parts = stripped.split(":")
+                        if len(parts) >= 2:
+                            try:
+                                return int(parts[1].strip())
+                            except ValueError:
+                                pass
+                    # Stop at next section
+                    elif line and not line.startswith(" ") and ":" in line:
+                        break
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
