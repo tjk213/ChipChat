@@ -807,6 +807,35 @@ def compute_metrics(
     )
 
 
+class DiskMetricsReader:
+    """Reads disk metrics with internal state tracking."""
+
+    def __init__(self):
+        self._prev_stats: dict[str, DiskStats] = {}
+
+    def read(self, configs: dict[str, DiskConfig]) -> dict[str, DiskMetrics]:
+        """Read current disk metrics for configured devices."""
+        curr_stats = _read_diskstats_linux() if platform.system() == "Linux" else {}
+        metrics = {}
+
+        for device, cfg in configs.items():
+            if device in curr_stats and device in self._prev_stats:
+                metrics[device] = compute_metrics(
+                    self._prev_stats[device],
+                    curr_stats[device],
+                    cfg,
+                )
+
+        self._prev_stats = curr_stats
+        return metrics
+
+    def available_devices(self) -> set[str]:
+        """Return set of device names found on system."""
+        if platform.system() != "Linux":
+            return set()
+        return set(_read_diskstats_linux().keys())
+
+
 def read_netstats() -> dict[str, NetStats]:
     """Read current network stats (cross-platform)"""
     if platform.system() == "Linux":
@@ -2500,18 +2529,18 @@ def main():
     net_configs = {k: v for k, v in configs.items() if v.type == "net"}
 
     # Read initial stats
-    prev_disk_stats = read_diskstats()
+    disk_reader = DiskMetricsReader()
     prev_net_stats = read_netstats()
 
     # Filter to only configured devices that exist
-    available_disks = set(prev_disk_stats.keys()) & set(disk_configs.keys())
+    available_disks = disk_reader.available_devices() & set(disk_configs.keys())
     available_nets = set(prev_net_stats.keys()) & set(net_configs.keys())
     available = available_disks | available_nets
 
     if not available:
         print(f"None of the configured devices found")
         print(f"Configured disks: {list(disk_configs.keys())}")
-        print(f"Available disks: {list(prev_disk_stats.keys())}")
+        print(f"Available disks: {list(disk_reader.available_devices())}")
         print(f"Configured nets: {list(net_configs.keys())}")
         print(f"Available nets: {list(prev_net_stats.keys())}")
         return
@@ -2527,6 +2556,9 @@ def main():
                 print(f"Error in config for {device}: {e}")
                 return
 
+    # Prime disk reader with initial stats
+    disk_reader.read(disk_configs)
+
     time.sleep(args.interval)
 
     refresh_counter = 0
@@ -2540,23 +2572,15 @@ def main():
     with Live(console=console, refresh_per_second=4, screen=True) as live:
         while True:
             try:
-                curr_disk_stats = read_diskstats()
+                metrics = disk_reader.read(disk_configs)
                 curr_net_stats = read_netstats()
 
-                metrics = {}
                 for device, cfg in configs.items():
                     if cfg.type == "net":
                         if device in prev_net_stats and device in curr_net_stats:
                             metrics[device] = compute_net_metrics(
                                 prev_net_stats[device],
                                 curr_net_stats[device],
-                            )
-                    else:
-                        if device in prev_disk_stats and device in curr_disk_stats:
-                            metrics[device] = compute_metrics(
-                                prev_disk_stats[device],
-                                curr_disk_stats[device],
-                                cfg,
                             )
 
                 live.update(render_display(
@@ -2566,7 +2590,6 @@ def main():
                     text_widths,
                 ))
 
-                prev_disk_stats = curr_disk_stats
                 prev_net_stats = curr_net_stats
                 refresh_counter += 1
                 time.sleep(args.interval)
