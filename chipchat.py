@@ -2492,6 +2492,7 @@ def main():
         print("No devices configured. Edit your config file.")
         return
 
+    print('ChipChat: Initializing...')
     console = Console()
 
     # Separate disk and net configs
