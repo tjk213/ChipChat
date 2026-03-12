@@ -738,36 +738,6 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
 
     return TextConfig(type=text_type, thresholds=thresholds, val=val, downsample=downsample, inverted=inverted, style=style, scale=scale, offset=offset, label=label, align=align)
 
-def _read_diskstats_linux() -> dict[str, DiskStatsLinux]:
-    """Read current stats from /proc/diskstats"""
-    stats = {}
-    timestamp = time.time()
-
-    with open("/proc/diskstats") as f:
-        for line in f:
-            parts = line.split()
-            if len(parts) < 14:
-                continue
-
-            name = parts[2]
-            # Fields: https://www.kernel.org/doc/Documentation/iostats.txt
-            # Field 1: reads completed
-            # Field 3: sectors read
-            # Field 5: writes completed
-            # Field 7: sectors written
-            # Field 10: ms spent doing I/O
-            stats[name] = DiskStatsLinux(
-                timestamp=timestamp,
-                reads_completed=int(parts[3]),
-                writes_completed=int(parts[7]),
-                sectors_read=int(parts[5]),
-                sectors_written=int(parts[9]),
-                io_ms=int(parts[12]),
-            )
-
-    return stats
-
-
 def compute_metrics(
     prev: DiskStatsLinux,
     curr: DiskStatsLinux,
@@ -821,7 +791,7 @@ class DiskMetricsReader:
 
     def _read_linux(self, configs: dict[str, DiskConfig]) -> dict[str, DiskMetrics]:
         """Read disk metrics on Linux using /proc/diskstats."""
-        curr_stats = _read_diskstats_linux()
+        curr_stats = self._read_diskstats_linux()
         metrics = {}
 
         for device, cfg in configs.items():
@@ -832,6 +802,35 @@ class DiskMetricsReader:
 
         self._prev_stats = curr_stats
         return metrics
+
+    def _read_diskstats_linux(self) -> dict[str, DiskStatsLinux]:
+        """Read current stats from /proc/diskstats"""
+        stats = {}
+        timestamp = time.time()
+
+        with open("/proc/diskstats") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 14:
+                    continue
+
+                name = parts[2]
+                # Fields: https://www.kernel.org/doc/Documentation/iostats.txt
+                # Field 1: reads completed
+                # Field 3: sectors read
+                # Field 5: writes completed
+                # Field 7: sectors written
+                # Field 10: ms spent doing I/O
+                stats[name] = DiskStatsLinux(
+                    timestamp=timestamp,
+                    reads_completed=int(parts[3]),
+                    writes_completed=int(parts[7]),
+                    sectors_read=int(parts[5]),
+                    sectors_written=int(parts[9]),
+                    io_ms=int(parts[12]),
+                )
+
+        return stats
 
     def _read_macos(self, configs: dict[str, DiskConfig]) -> dict[str, DiskMetrics]:
         """Read disk metrics on macOS using iostat -dI.
@@ -921,7 +920,7 @@ class DiskMetricsReader:
     def available_devices(self) -> set[str]:
         """Return set of device names found on system."""
         if platform.system() == "Linux":
-            return set(_read_diskstats_linux().keys())
+            return set(self._read_diskstats_linux().keys())
         elif platform.system() == "Darwin":
             return set(self._read_iostat_macos().keys())
         return set()
