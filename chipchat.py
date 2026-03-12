@@ -812,10 +812,19 @@ class DiskMetricsReader:
 
     def __init__(self):
         self._prev_stats: dict[str, DiskStats] = {}
+        self._prev_macos: dict[str, tuple[int, float, float]] = {}  # xfrs, mb, timestamp
 
     def read(self, configs: dict[str, DiskConfig]) -> dict[str, DiskMetrics]:
         """Read current disk metrics for configured devices."""
-        curr_stats = _read_diskstats_linux() if platform.system() == "Linux" else {}
+        if platform.system() == "Linux":
+            return self._read_linux(configs)
+        elif platform.system() == "Darwin":
+            return self._read_macos(configs)
+        return {}
+
+    def _read_linux(self, configs: dict[str, DiskConfig]) -> dict[str, DiskMetrics]:
+        """Read disk metrics on Linux using /proc/diskstats."""
+        curr_stats = _read_diskstats_linux()
         metrics = {}
 
         for device, cfg in configs.items():
@@ -829,11 +838,102 @@ class DiskMetricsReader:
         self._prev_stats = curr_stats
         return metrics
 
+    def _read_macos(self, configs: dict[str, DiskConfig]) -> dict[str, DiskMetrics]:
+        """Read disk metrics on macOS using iostat -dI.
+
+        Uses cumulative totals (like Linux) - computes rates from deltas.
+        Only total throughput and IOPS available (no read/write split, no util%).
+        """
+        curr = self._read_iostat_macos()
+        metrics = {}
+        timestamp = time.time()
+
+        for device in configs:
+            if device in curr and device in self._prev_macos:
+                prev_xfrs, prev_mb, prev_ts = self._prev_macos[device]
+                curr_xfrs, curr_mb = curr[device]
+
+                interval = timestamp - prev_ts
+                if interval <= 0:
+                    interval = 1.0
+
+                delta_xfrs = curr_xfrs - prev_xfrs
+                delta_mb = curr_mb - prev_mb
+
+                metrics[device] = DiskMetrics(
+                    util_pct=0.0,  # Not available on macOS
+                    read_mbps=0.0,  # Not available on macOS
+                    write_mbps=0.0,  # Not available on macOS
+                    total_mbps=delta_mb / interval,
+                    read_iops=0.0,  # Not available on macOS
+                    write_iops=0.0,  # Not available on macOS
+                    total_iops=delta_xfrs / interval,
+                )
+
+        # Update prev with current values
+        for device, (xfrs, mb) in curr.items():
+            self._prev_macos[device] = (xfrs, mb, timestamp)
+
+        return metrics
+
+    def _read_iostat_macos(self) -> dict[str, tuple[int, float]]:
+        """Parse iostat -dI output for cumulative totals.
+
+        Returns dict mapping device name to (xfrs, mb).
+        """
+        result_dict: dict[str, tuple[int, float]] = {}
+        try:
+            result = subprocess.run(
+                ["iostat", "-dI"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return result_dict
+
+            lines = result.stdout.strip().split('\n')
+
+            # Find header line with disk names
+            disk_names: list[str] = []
+            for line in lines:
+                if 'disk' in line.lower() and 'KB/t' not in line:
+                    disk_names = line.split()
+                    break
+
+            if not disk_names:
+                return result_dict
+
+            # Get the data line (last non-empty line)
+            data_line = lines[-1].strip()
+            if not data_line or 'KB/t' in data_line:
+                return result_dict
+
+            values = data_line.split()
+            # Each disk has 3 values: KB/t, xfrs, MB
+            for i, disk in enumerate(disk_names):
+                base_idx = i * 3
+                if base_idx + 2 >= len(values):
+                    continue
+                try:
+                    xfrs = int(values[base_idx + 1])
+                    mb = float(values[base_idx + 2])
+                    result_dict[disk] = (xfrs, mb)
+                except (ValueError, IndexError):
+                    continue
+
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+
+        return result_dict
+
     def available_devices(self) -> set[str]:
         """Return set of device names found on system."""
-        if platform.system() != "Linux":
-            return set()
-        return set(_read_diskstats_linux().keys())
+        if platform.system() == "Linux":
+            return set(_read_diskstats_linux().keys())
+        elif platform.system() == "Darwin":
+            return set(self._read_iostat_macos().keys())
+        return set()
 
 
 def read_netstats() -> dict[str, NetStats]:
