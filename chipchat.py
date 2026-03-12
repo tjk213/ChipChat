@@ -82,13 +82,25 @@ def render_logo(width: int) -> list[Text]:
 
 @dataclass
 class DiskStats:
+    """Base class for disk stats"""
+    timestamp: float
+
+
+@dataclass
+class DiskStatsLinux(DiskStats):
     """Raw stats from /proc/diskstats"""
     reads_completed: int
     writes_completed: int
     sectors_read: int
     sectors_written: int
     io_ms: int  # milliseconds spent doing I/O
-    timestamp: float
+
+
+@dataclass
+class DiskStatsMacos(DiskStats):
+    """Raw stats from iostat -dI"""
+    xfrs: int  # total transfers
+    mb: float  # total megabytes
 
 
 @dataclass
@@ -726,7 +738,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
 
     return TextConfig(type=text_type, thresholds=thresholds, val=val, downsample=downsample, inverted=inverted, style=style, scale=scale, offset=offset, label=label, align=align)
 
-def _read_diskstats_linux() -> dict[str, DiskStats]:
+def _read_diskstats_linux() -> dict[str, DiskStatsLinux]:
     """Read current stats from /proc/diskstats"""
     stats = {}
     timestamp = time.time()
@@ -744,21 +756,21 @@ def _read_diskstats_linux() -> dict[str, DiskStats]:
             # Field 5: writes completed
             # Field 7: sectors written
             # Field 10: ms spent doing I/O
-            stats[name] = DiskStats(
+            stats[name] = DiskStatsLinux(
+                timestamp=timestamp,
                 reads_completed=int(parts[3]),
                 writes_completed=int(parts[7]),
                 sectors_read=int(parts[5]),
                 sectors_written=int(parts[9]),
                 io_ms=int(parts[12]),
-                timestamp=timestamp,
             )
 
     return stats
 
 
 def compute_metrics(
-    prev: DiskStats,
-    curr: DiskStats,
+    prev: DiskStatsLinux,
+    curr: DiskStatsLinux,
     config: DiskConfig
 ) -> DiskMetrics:
     """Compute metrics from two samples"""
@@ -798,7 +810,6 @@ class DiskMetricsReader:
 
     def __init__(self):
         self._prev_stats: dict[str, DiskStats] = {}
-        self._prev_macos: dict[str, tuple[int, float, float]] = {}  # xfrs, mb, timestamp
 
     def read(self, configs: dict[str, DiskConfig]) -> dict[str, DiskMetrics]:
         """Read current disk metrics for configured devices."""
@@ -814,12 +825,10 @@ class DiskMetricsReader:
         metrics = {}
 
         for device, cfg in configs.items():
-            if device in curr_stats and device in self._prev_stats:
-                metrics[device] = compute_metrics(
-                    self._prev_stats[device],
-                    curr_stats[device],
-                    cfg,
-                )
+            prev = self._prev_stats.get(device)
+            curr = curr_stats.get(device)
+            if prev and curr and isinstance(prev, DiskStatsLinux):
+                metrics[device] = compute_metrics(prev, curr, cfg)
 
         self._prev_stats = curr_stats
         return metrics
@@ -830,21 +839,19 @@ class DiskMetricsReader:
         Uses cumulative totals (like Linux) - computes rates from deltas.
         Only total throughput and IOPS available (no read/write split, no util%).
         """
-        curr = self._read_iostat_macos()
+        curr_stats = self._read_iostat_macos()
         metrics = {}
-        timestamp = time.time()
 
         for device in configs:
-            if device in curr and device in self._prev_macos:
-                prev_xfrs, prev_mb, prev_ts = self._prev_macos[device]
-                curr_xfrs, curr_mb = curr[device]
-
-                interval = timestamp - prev_ts
+            prev = self._prev_stats.get(device)
+            curr = curr_stats.get(device)
+            if prev and curr and isinstance(prev, DiskStatsMacos):
+                interval = curr.timestamp - prev.timestamp
                 if interval <= 0:
                     interval = 1.0
 
-                delta_xfrs = curr_xfrs - prev_xfrs
-                delta_mb = curr_mb - prev_mb
+                delta_xfrs = curr.xfrs - prev.xfrs
+                delta_mb = curr.mb - prev.mb
 
                 # macOS iostat doesn't split read/write, put totals in read
                 metrics[device] = DiskMetrics(
@@ -855,18 +862,13 @@ class DiskMetricsReader:
                     write_iops=0.0,
                 )
 
-        # Update prev with current values
-        for device, (xfrs, mb) in curr.items():
-            self._prev_macos[device] = (xfrs, mb, timestamp)
-
+        self._prev_stats = curr_stats
         return metrics
 
-    def _read_iostat_macos(self) -> dict[str, tuple[int, float]]:
-        """Parse iostat -dI output for cumulative totals.
-
-        Returns dict mapping device name to (xfrs, mb).
-        """
-        result_dict: dict[str, tuple[int, float]] = {}
+    def _read_iostat_macos(self) -> dict[str, DiskStatsMacos]:
+        """Parse iostat -dI output for cumulative totals."""
+        result_dict: dict[str, DiskStatsMacos] = {}
+        timestamp = time.time()
         try:
             result = subprocess.run(
                 ["iostat", "-dI"],
@@ -903,7 +905,11 @@ class DiskMetricsReader:
                 try:
                     xfrs = int(values[base_idx + 1])
                     mb = float(values[base_idx + 2])
-                    result_dict[disk] = (xfrs, mb)
+                    result_dict[disk] = DiskStatsMacos(
+                        timestamp=timestamp,
+                        xfrs=xfrs,
+                        mb=mb,
+                    )
                 except (ValueError, IndexError):
                     continue
 
