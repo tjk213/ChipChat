@@ -107,10 +107,8 @@ class DiskMetrics:
     util_pct: float
     read_mbps: float
     write_mbps: float
-    total_mbps: float
     read_iops: float
     write_iops: float
-    total_iops: float
 
 
 @dataclass
@@ -118,10 +116,8 @@ class NetMetrics:
     """Computed metrics from net stat deltas"""
     rx_mbps: float
     tx_mbps: float
-    total_mbps: float
     rx_pps: float
     tx_pps: float
-    total_pps: float
 
 
 @dataclass
@@ -787,11 +783,9 @@ def compute_metrics(
 
     read_mbps = (delta_read * sector_bytes) / (interval * 1024 * 1024)
     write_mbps = (delta_write * sector_bytes) / (interval * 1024 * 1024)
-    total_mbps = read_mbps + write_mbps
 
     read_iops = delta_read_ops / interval
     write_iops = delta_write_ops / interval
-    total_iops = read_iops + write_iops
 
     # %util = time spent doing I/O / total time
     util_pct = min(100.0, (delta_io_ms / (interval * 1000)) * 100)
@@ -800,10 +794,8 @@ def compute_metrics(
         util_pct=util_pct,
         read_mbps=read_mbps,
         write_mbps=write_mbps,
-        total_mbps=total_mbps,
         read_iops=read_iops,
         write_iops=write_iops,
-        total_iops=total_iops,
     )
 
 
@@ -860,14 +852,13 @@ class DiskMetricsReader:
                 delta_xfrs = curr_xfrs - prev_xfrs
                 delta_mb = curr_mb - prev_mb
 
+                # macOS iostat doesn't split read/write, put totals in read
                 metrics[device] = DiskMetrics(
                     util_pct=0.0,  # Not available on macOS
-                    read_mbps=0.0,  # Not available on macOS
-                    write_mbps=0.0,  # Not available on macOS
-                    total_mbps=delta_mb / interval,
-                    read_iops=0.0,  # Not available on macOS
-                    write_iops=0.0,  # Not available on macOS
-                    total_iops=delta_xfrs / interval,
+                    read_mbps=delta_mb / interval,
+                    write_mbps=0.0,
+                    read_iops=delta_xfrs / interval,
+                    write_iops=0.0,
                 )
 
         # Update prev with current values
@@ -1049,19 +1040,15 @@ def compute_net_metrics(prev: NetStats, curr: NetStats) -> NetMetrics:
 
     rx_mbps = delta_rx / (interval * 1024 * 1024)
     tx_mbps = delta_tx / (interval * 1024 * 1024)
-    total_mbps = rx_mbps + tx_mbps
 
     rx_pps = delta_rx_pkt / interval
     tx_pps = delta_tx_pkt / interval
-    total_pps = rx_pps + tx_pps
 
     return NetMetrics(
         rx_mbps=rx_mbps,
         tx_mbps=tx_mbps,
-        total_mbps=total_mbps,
         rx_pps=rx_pps,
         tx_pps=tx_pps,
-        total_pps=total_pps,
     )
 
 
