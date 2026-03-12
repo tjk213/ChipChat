@@ -1528,6 +1528,15 @@ def get_swap_usage() -> tuple[int, int]:
 
 
 def get_device_size(device: str) -> int | None:
+    """Get total device size in bytes"""
+    if platform.system() == "Linux":
+        return _get_device_size_linux(device)
+    elif platform.system() == "Darwin":
+        return _get_device_size_macos(device)
+    return None
+
+
+def _get_device_size_linux(device: str) -> int | None:
     """Get total device size in bytes from sysfs"""
     try:
         with open(f"/sys/block/{device}/size") as f:
@@ -1535,6 +1544,29 @@ def get_device_size(device: str) -> int | None:
             return sectors * 512
     except (OSError, ValueError):
         return None
+
+
+def _get_device_size_macos(device: str) -> int | None:
+    """Get total device size in bytes from diskutil"""
+    try:
+        result = subprocess.run(
+            ["diskutil", "info", device],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+
+        for line in result.stdout.split('\n'):
+            if 'Disk Size:' in line:
+                # Format: "   Disk Size:                 500107862016 Bytes (...)"
+                match = re.search(r'(\d+)\s+Bytes', line)
+                if match:
+                    return int(match.group(1))
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError):
+        pass
+    return None
 
 
 def get_nvme_hwmon_path(device: str) -> Path | None:
