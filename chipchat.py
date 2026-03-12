@@ -2497,8 +2497,16 @@ def load_config(path: Path) -> tuple[dict[str, DiskConfig], int]:
                 "bandwidth",
             ]
         else:
-            # Disk defaults: utilization, iops, bandwidth
-            meters_raw = ["utilization", "iops", "bandwidth"]
+            # Disk defaults
+            if platform.system() == "Darwin":
+                # macOS: no real util%, use decaying bandwidth instead
+                meters_raw = [
+                    {"bandwidth": {"label": "util", "max": "auto", "halflife": "1m", "color": "yellow"}},
+                    "iops",
+                    "bandwidth",
+                ]
+            else:
+                meters_raw = ["utilization", "iops", "bandwidth"]
 
         meter_device_type = "net" if is_net else "disk"
         meters = [parse_meter(m, meter_device_type) for m in meters_raw]
