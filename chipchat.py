@@ -2347,13 +2347,22 @@ def parse_meter(meter_spec, device_type: str = "disk") -> MeterConfig:
     }
 
     # Default colors by meter type
-    default_colors = {
-        "utilization": ("yellow", "yellow"),  # single color meter
-        "iops": ("cyan", "magenta"),
-        "bandwidth": ("cyan", "magenta"),
-        "pps": ("cyan", "magenta"),
-        "blank": ("white", "white"),
-    }
+    # macOS iostat doesn't split read/write, use white to indicate combined data
+    if platform.system() == "Darwin" and device_type == "disk":
+        default_colors = {
+            "utilization": ("yellow", "yellow"),  # single color meter
+            "iops": ("white", "white"),
+            "bandwidth": ("white", "white"),
+            "blank": ("white", "white"),
+        }
+    else:
+        default_colors = {
+            "utilization": ("yellow", "yellow"),  # single color meter
+            "iops": ("cyan", "magenta"),
+            "bandwidth": ("cyan", "magenta"),
+            "pps": ("cyan", "magenta"),
+            "blank": ("white", "white"),
+        }
 
     # Simple string form
     if isinstance(meter_spec, str):
