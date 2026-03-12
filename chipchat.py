@@ -1585,9 +1585,16 @@ def get_nvme_hwmon_path(device: str) -> Path | None:
 
 def _parse_smartctl_temp(output: str) -> float | None:
     """Parse temperature from smartctl output"""
-    # Look for temperature in SMART attributes
-    # Common attribute IDs: 194 (Temperature_Celsius), 190 (Airflow_Temperature_Cel)
     for line in output.splitlines():
+        # NVMe format: "Temperature:                        35 Celsius"
+        if line.strip().startswith("Temperature:"):
+            match = re.search(r'Temperature:\s+(\d+)', line)
+            if match:
+                return float(match.group(1))
+
+        # SATA format: tabular with 10+ columns
+        # Look for temperature in SMART attributes
+        # Common attribute IDs: 194 (Temperature_Celsius), 190 (Airflow_Temperature_Cel)
         parts = line.split()
         if len(parts) >= 10:
             # Check for temperature attributes by ID or name
