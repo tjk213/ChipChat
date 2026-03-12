@@ -780,6 +780,7 @@ class DiskMetricsReader:
 
     def __init__(self):
         self._prev_stats: dict[str, DiskStats] = {}
+        self.read({})  # Prime by reading all devices
 
     def read(self, configs: dict[str, DiskConfig]) -> dict[str, DiskMetrics]:
         """Read current disk metrics for configured devices."""
@@ -919,11 +920,7 @@ class DiskMetricsReader:
 
     def available_devices(self) -> set[str]:
         """Return set of device names found on system."""
-        if platform.system() == "Linux":
-            return set(self._read_diskstats_linux().keys())
-        elif platform.system() == "Darwin":
-            return set(self._read_iostat_macos().keys())
-        return set()
+        return set(self._prev_stats.keys())
 
 
 def read_netstats() -> dict[str, NetStats]:
@@ -1056,6 +1053,7 @@ class NetMetricsReader:
 
     def __init__(self):
         self._prev_stats: dict[str, NetStats] = {}
+        self.read({})  # Prime by reading all devices
 
     def read(self, configs: dict[str, DiskConfig]) -> dict[str, NetMetrics]:
         """Read current network metrics for configured devices."""
@@ -1074,7 +1072,7 @@ class NetMetricsReader:
 
     def available_devices(self) -> set[str]:
         """Return set of device names found on system."""
-        return set(read_netstats().keys())
+        return set(self._prev_stats.keys())
 
 
 def get_wifi_info(device: str) -> WifiInfo:
@@ -2685,10 +2683,7 @@ def main():
                 print(f"Error in config for {device}: {e}")
                 return
 
-    # Prime readers with initial stats
-    disk_reader.read(disk_configs)
-    net_reader.read(net_configs)
-
+    # Wait one interval for meaningful deltas (readers were primed in constructors)
     time.sleep(args.interval)
 
     refresh_counter = 0
