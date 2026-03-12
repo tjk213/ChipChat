@@ -1583,37 +1583,48 @@ def get_nvme_hwmon_path(device: str) -> Path | None:
     return None
 
 
+def _parse_smartctl_temp(output: str) -> float | None:
+    """Parse temperature from smartctl output"""
+    # Look for temperature in SMART attributes
+    # Common attribute IDs: 194 (Temperature_Celsius), 190 (Airflow_Temperature_Cel)
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 10:
+            # Check for temperature attributes by ID or name
+            attr_id = parts[0]
+            attr_name = parts[1] if len(parts) > 1 else ""
+            if attr_id in ("194", "190") or "temperature" in attr_name.lower():
+                # Temperature is typically the last numeric value (RAW_VALUE)
+                try:
+                    # Handle cases like "35" or "35 (Min/Max 20/45)"
+                    raw_value = parts[9].split()[0]
+                    return float(raw_value)
+                except (ValueError, IndexError):
+                    continue
+    return None
+
+
 def get_sata_temp(device: str) -> float | None:
     """Get current temperature in Celsius for a SATA device via smartctl"""
-    try:
-        result = subprocess.run(
-            ["sudo", "-n", "smartctl", "-A", f"/dev/{device}"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        # smartctl uses bitmask return codes, don't strictly check returncode
-        # Just try to parse the output
-
-        # Look for temperature in SMART attributes
-        # Common attribute IDs: 194 (Temperature_Celsius), 190 (Airflow_Temperature_Cel)
-        for line in result.stdout.splitlines():
-            parts = line.split()
-            if len(parts) >= 10:
-                # Check for temperature attributes by ID or name
-                attr_id = parts[0]
-                attr_name = parts[1] if len(parts) > 1 else ""
-                if attr_id in ("194", "190") or "temperature" in attr_name.lower():
-                    # Temperature is typically the last numeric value (RAW_VALUE)
-                    try:
-                        # Handle cases like "35" or "35 (Min/Max 20/45)"
-                        raw_value = parts[9].split()[0]
-                        return float(raw_value)
-                    except (ValueError, IndexError):
-                        continue
-        return None
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
+    # Try without sudo first (works on macOS), then with sudo
+    for cmd in [
+        ["smartctl", "-A", f"/dev/{device}"],
+        ["sudo", "-n", "smartctl", "-A", f"/dev/{device}"],
+    ]:
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            # smartctl uses bitmask return codes, don't strictly check returncode
+            temp = _parse_smartctl_temp(result.stdout)
+            if temp is not None:
+                return temp
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            continue
+    return None
 
 
 def get_disk_temp(device: str) -> float | None:
