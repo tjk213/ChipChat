@@ -786,6 +786,8 @@ class DiskMetricsReader:
         """Read current disk metrics for configured devices."""
         if platform.system() == "Linux":
             return self._read_linux(configs)
+        elif platform.system() == "FreeBSD":
+            return self._read_freebsd(configs)
         elif platform.system() == "Darwin":
             return self._read_macos(configs)
         return {}
@@ -832,6 +834,75 @@ class DiskMetricsReader:
                 )
 
         return stats
+
+    def _read_freebsd(self, configs: dict[str, DiskConfig]) -> dict[str, DiskMetrics]:
+        """Read disk metrics on FreeBSD using iostat -Ix.
+
+        Uses cumulative counters with read/write split, like Linux.
+        """
+        curr_stats = self._read_iostat_freebsd()
+        metrics = {}
+
+        for device, cfg in configs.items():
+            prev = self._prev_stats.get(device)
+            curr = curr_stats.get(device)
+            if prev and curr and isinstance(prev, DiskStatsLinux):
+                metrics[device] = compute_metrics(prev, curr, cfg)
+
+        self._prev_stats = curr_stats
+        return metrics
+
+    def _read_iostat_freebsd(self) -> dict[str, DiskStatsLinux]:
+        """Parse iostat -Ix output for cumulative counters with read/write split.
+
+        Output format:
+                                extended device statistics
+        device           r/i         w/i         kr/i         kw/i qlen   tsvc_t/i      sb/i
+        nda0         81148.0   1695013.0    1013774.5   34682300.0    0      455.2     432.0
+        """
+        result_dict: dict[str, DiskStatsLinux] = {}
+        timestamp = time.time()
+        try:
+            result = subprocess.run(
+                ["iostat", "-Ix"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return result_dict
+
+            lines = result.stdout.strip().split('\n')
+
+            for line in lines:
+                parts = line.split()
+                # Skip header lines and empty lines
+                if len(parts) < 5 or parts[0] in ('device', 'extended'):
+                    continue
+
+                device = parts[0]
+                try:
+                    r_i = float(parts[1])      # read ops
+                    w_i = float(parts[2])      # write ops
+                    kr_i = float(parts[3])     # read KB
+                    kw_i = float(parts[4])     # write KB
+
+                    # Convert KB to sectors (512 bytes per sector)
+                    result_dict[device] = DiskStatsLinux(
+                        timestamp=timestamp,
+                        reads_completed=int(r_i),
+                        writes_completed=int(w_i),
+                        sectors_read=int(kr_i * 2),
+                        sectors_written=int(kw_i * 2),
+                        io_ms=0,  # Not available from iostat
+                    )
+                except (ValueError, IndexError):
+                    continue
+
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+
+        return result_dict
 
     def _read_macos(self, configs: dict[str, DiskConfig]) -> dict[str, DiskMetrics]:
         """Read disk metrics on macOS using iostat -dI.
@@ -2551,8 +2622,8 @@ def load_config(path: Path) -> tuple[dict[str, DiskConfig], int]:
             ]
         else:
             # Disk defaults
-            if platform.system() == "Darwin":
-                # macOS: no real util%, use decaying bandwidth instead
+            if platform.system() in ("Darwin", "FreeBSD"):
+                # BSD: no real util%, use decaying bandwidth instead
                 meters_raw = [
                     {"bandwidth": {"label": "util", "max": "auto", "halflife": "1m", "color": "yellow"}},
                     "iops",
