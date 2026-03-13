@@ -517,6 +517,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
         - "freq" -> TextConfig(type="freq", ...) [net only, WiFi frequency in GHz]
         - "link_speed" -> TextConfig(type="link_speed", ...) [net only, link speed in Mbps/Gbps]
         - "blank" -> TextConfig(type="blank", ...)
+        - {"text": {"label": "Label:", "value": "value"}} -> generic text with custom label and value
         - {"name": {"val": "Custom Name", "style": "cyan"}} -> TextConfig with custom name and style
         - {"ssid": {"style": "green"}} -> TextConfig with custom style
         - {"ip": {"style": {"color": "yellow", "dim": true}}} -> TextConfig with style dict
@@ -539,7 +540,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
     else:
         raise ValueError(f"Invalid text spec: {text_spec}")
 
-    valid_types = {"name", "temp", "usage", "signal", "ssid", "ip", "freq", "link_speed", "blank"}
+    valid_types = {"name", "temp", "usage", "signal", "ssid", "ip", "freq", "link_speed", "blank", "text"}
     if text_type not in valid_types:
         raise ValueError(f"Invalid text type: {text_type}. Valid: {valid_types}")
 
@@ -564,6 +565,9 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
 
     if text_type == "name":
         val = text_opts.get("val", default_name)
+        style = text_opts.get("style")
+    elif text_type == "text":
+        val = text_opts.get("value", "")
         style = text_opts.get("style")
     elif text_type == "temp":
         downsample = text_opts.get("downsample", 10)  # default: poll every 10 refreshes
@@ -1988,7 +1992,7 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
         for text_cfg in cfg.text:
             if text_cfg.type == "name":
                 width = len(text_cfg.val or cfg.name)
-            elif text_cfg.type in default_labels or text_cfg.label is not None:
+            elif text_cfg.type in default_labels or text_cfg.label is not None or text_cfg.type == "text":
                 # prefix + label + value
                 label = get_label(text_cfg)
                 label_len = len(label)
@@ -2010,6 +2014,8 @@ def calc_text_widths(configs: dict[str, DiskConfig], columns: int) -> list[int]:
                     value_len = 7  # "5.18GHz"
                 elif text_cfg.type == "link_speed":
                     value_len = 7  # "10Gbps"
+                elif text_cfg.type == "text" and text_cfg.val is not None:
+                    value_len = len(text_cfg.val)
                 else:
                     value_len = 0
 
@@ -2278,6 +2284,8 @@ def render_display(
                         else:
                             speed_str = f"{link_speed}Mbps"
                     device_col = build_label_value(get_label(text_cfg), speed_str, value_style, text_cfg.align)
+                elif text_cfg.type == "text":
+                    device_col = build_label_value(get_label(text_cfg), text_cfg.val, text_cfg.style, text_cfg.align)
                 else:
                     device_col = ""
 
