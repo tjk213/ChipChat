@@ -1732,10 +1732,19 @@ def get_sata_temp(device: str) -> float | None:
 
 def get_disk_temp(device: str) -> float | None:
     """Get temperature for any disk type (NVMe or SATA)"""
-    # Try NVMe first (faster, no subprocess)
+    # Try NVMe first (faster, no subprocess on Linux)
     temp = get_hwmon_temp(get_nvme_hwmon_path(device))
     if temp is not None:
         return temp
+
+    # FreeBSD: nda0 (disk) -> nvme0 (controller) for smartctl
+    if platform.system() == "FreeBSD":
+        match = re.match(r'nda(\d+)', device)
+        if match:
+            nvme_device = f"nvme{match.group(1)}"
+            temp = get_sata_temp(nvme_device)
+            if temp is not None:
+                return temp
 
     # Fall back to SATA/smartctl
     return get_sata_temp(device)
