@@ -517,7 +517,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
         - "freq" -> TextConfig(type="freq", ...) [net only, WiFi frequency in GHz]
         - "link_speed" -> TextConfig(type="link_speed", ...) [net only, link speed in Mbps/Gbps]
         - "blank" -> TextConfig(type="blank", ...)
-        - {"text": {"label": "Label:", "value": "value"}} -> generic text with custom label and value
+        - {"text": {"label": "Label:", "val": "value"}} -> generic text with custom label and value
         - {"name": {"val": "Custom Name", "style": "cyan"}} -> TextConfig with custom name and style
         - {"ssid": {"style": "green"}} -> TextConfig with custom style
         - {"ip": {"style": {"color": "yellow", "dim": true}}} -> TextConfig with style dict
@@ -567,7 +567,7 @@ def parse_text(text_spec, device_type: str = "disk", device: str | None = None, 
         val = text_opts.get("val", default_name)
         style = text_opts.get("style")
     elif text_type == "text":
-        val = text_opts.get("value", "")
+        val = text_opts.get("val", "")
         style = text_opts.get("style")
     elif text_type == "temp":
         downsample = text_opts.get("downsample", 10)  # default: poll every 10 refreshes
