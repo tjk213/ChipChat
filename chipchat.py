@@ -2656,8 +2656,15 @@ def load_config(path: Path) -> tuple[dict[str, DiskConfig], int]:
             ]
         else:
             # Disk defaults
+            #
+            # On mac, there's no way to get actual utilization data from iostat, so we use the same
+            # decaying exponential default as above for net devices.
+            #
+            # On Freebsd, we can get utilization stats from iostat -x (%b), but not from iostat -Ix.
+            # Currently, we use `iostat -Ix` as our only input source on FreeBSD, so for now we also
+            # use the proxy utilization meter. We should update this though; true utilization is doable
+            # in the FreeBSD case.
             if platform.system() in ("Darwin", "FreeBSD"):
-                # BSD: no real util%, use decaying bandwidth instead
                 meters_raw = [
                     {"bandwidth": {"label": "util", "max": "auto", "halflife": "1m", "color": "yellow"}},
                     "iops",
