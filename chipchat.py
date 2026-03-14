@@ -2324,6 +2324,17 @@ def render_display(
                     if isinstance(meter.max_value, float):
                         # Explicit max configured
                         effective_max = meter.max_value
+                    elif is_device_reference(meter.max_value):
+                        # Device reference: use referenced device's observed_max
+                        ref_key = f"{meter.max_value}_iops_0"
+                        ref_observed = observed_max.get(ref_key, 0)
+                        if meter.halflife is not None:
+                            decay_factor = 0.5 ** (interval / meter.halflife)
+                            prev_decaying = decaying_max.get(iops_key, 0)
+                            decaying_max[iops_key] = max(ref_observed, prev_decaying * decay_factor)
+                            effective_max = decaying_max[iops_key]
+                        else:
+                            effective_max = ref_observed
                     elif meter.halflife is not None:
                         # Auto with decay: apply exponential decay
                         decay_factor = 0.5 ** (interval / meter.halflife)
@@ -2358,6 +2369,17 @@ def render_display(
                     # Determine effective max for display
                     if isinstance(meter.max_value, float):
                         effective_max = meter.max_value
+                    elif is_device_reference(meter.max_value):
+                        # Device reference: use referenced device's observed_max
+                        ref_key = f"{meter.max_value}_pps_0"
+                        ref_observed = observed_max.get(ref_key, 0)
+                        if meter.halflife is not None:
+                            decay_factor = 0.5 ** (interval / meter.halflife)
+                            prev_decaying = decaying_max.get(pps_key, 0)
+                            decaying_max[pps_key] = max(ref_observed, prev_decaying * decay_factor)
+                            effective_max = decaying_max[pps_key]
+                        else:
+                            effective_max = ref_observed
                     elif meter.halflife is not None:
                         decay_factor = 0.5 ** (interval / meter.halflife)
                         prev_decaying = decaying_max.get(pps_key, 0)
@@ -2397,6 +2419,17 @@ def render_display(
                     if isinstance(meter.max_value, float):
                         # Explicit max configured
                         effective_max = meter.max_value
+                    elif is_device_reference(meter.max_value):
+                        # Device reference: use referenced device's observed_max
+                        ref_key = f"{meter.max_value}_bandwidth_0"
+                        ref_observed = observed_max.get(ref_key, 0)
+                        if meter.halflife is not None:
+                            decay_factor = 0.5 ** (interval / meter.halflife)
+                            prev_decaying = decaying_max.get(bw_key, 0)
+                            decaying_max[bw_key] = max(ref_observed, prev_decaying * decay_factor)
+                            effective_max = decaying_max[bw_key]
+                        else:
+                            effective_max = ref_observed
                     elif meter.halflife is not None:
                         # Auto with decay: apply exponential decay
                         decay_factor = 0.5 ** (interval / meter.halflife)
@@ -2952,41 +2985,59 @@ def main():
             elif meter.type == "bandwidth":
                 peak = observed_max.get(f"{device}_bandwidth_{meter_idx}", 0)
                 formatted = format_rate(peak, "bandwidth")
-                if not isinstance(meter.max_value, float):
+                if isinstance(meter.max_value, float):
+                    pct = (peak / meter.max_value * 100) if meter.max_value > 0 else 0
+                    lines.append((meter.label, formatted, f"({pct:3.0f}%)"))
+                elif is_device_reference(meter.max_value):
+                    if meter.halflife is not None:
+                        halflife_str = format_time(meter.halflife)
+                        lines.append((meter.label, formatted, f"(ref:{meter.max_value}, {halflife_str})"))
+                    else:
+                        lines.append((meter.label, formatted, f"(ref:{meter.max_value})"))
+                else:
                     if meter.halflife is not None:
                         halflife_str = format_time(meter.halflife)
                         lines.append((meter.label, formatted, f"(auto, {halflife_str})"))
                     else:
                         lines.append((meter.label, formatted, "(auto)"))
-                else:
-                    pct = (peak / meter.max_value * 100) if meter.max_value > 0 else 0
-                    lines.append((meter.label, formatted, f"({pct:3.0f}%)"))
 
             elif meter.type == "iops":
                 peak = observed_max.get(f"{device}_iops_{meter_idx}", 0)
                 formatted = format_rate(peak, "iops")
-                if not isinstance(meter.max_value, float):
+                if isinstance(meter.max_value, float):
+                    pct = (peak / meter.max_value * 100) if meter.max_value > 0 else 0
+                    lines.append((meter.label, formatted, f"({pct:3.0f}%)"))
+                elif is_device_reference(meter.max_value):
+                    if meter.halflife is not None:
+                        halflife_str = format_time(meter.halflife)
+                        lines.append((meter.label, formatted, f"(ref:{meter.max_value}, {halflife_str})"))
+                    else:
+                        lines.append((meter.label, formatted, f"(ref:{meter.max_value})"))
+                else:
                     if meter.halflife is not None:
                         halflife_str = format_time(meter.halflife)
                         lines.append((meter.label, formatted, f"(auto, {halflife_str})"))
                     else:
                         lines.append((meter.label, formatted, "(auto)"))
-                else:
-                    pct = (peak / meter.max_value * 100) if meter.max_value > 0 else 0
-                    lines.append((meter.label, formatted, f"({pct:3.0f}%)"))
 
             elif meter.type == "pps":
                 peak = observed_max.get(f"{device}_pps_{meter_idx}", 0)
                 formatted = format_rate(peak, "pps")
-                if not isinstance(meter.max_value, float):
+                if isinstance(meter.max_value, float):
+                    pct = (peak / meter.max_value * 100) if meter.max_value > 0 else 0
+                    lines.append((meter.label, formatted, f"({pct:3.0f}%)"))
+                elif is_device_reference(meter.max_value):
+                    if meter.halflife is not None:
+                        halflife_str = format_time(meter.halflife)
+                        lines.append((meter.label, formatted, f"(ref:{meter.max_value}, {halflife_str})"))
+                    else:
+                        lines.append((meter.label, formatted, f"(ref:{meter.max_value})"))
+                else:
                     if meter.halflife is not None:
                         halflife_str = format_time(meter.halflife)
                         lines.append((meter.label, formatted, f"(auto, {halflife_str})"))
                     else:
                         lines.append((meter.label, formatted, "(auto)"))
-                else:
-                    pct = (peak / meter.max_value * 100) if meter.max_value > 0 else 0
-                    lines.append((meter.label, formatted, f"({pct:3.0f}%)"))
 
         # Find max widths
         max_label = max(len(l[0]) for l in lines) if lines else 0
