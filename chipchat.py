@@ -145,7 +145,7 @@ class MeterConfig:
     """Per-meter configuration"""
     type: str  # "utilization", "iops", "bandwidth", "blank"
     label: str  # display label (max 4 chars)
-    max_value: float | None  # None = auto, value = explicit (MB/s for bandwidth, count for iops, % for util)
+    max_value: float | str  # "auto" = auto-scale, float = fixed, str = device reference (MB/s for bandwidth, count for iops, % for util)
     halflife: float | None  # seconds for exponential decay (None = all-time max, only for auto meters)
     color_in: str  # color for read/rx (or fill color for util)
     color_out: str  # color for write/tx (ignored for util)
@@ -188,11 +188,11 @@ class DiskConfig:
         return max(len(self.meters), len(self.text))
 
 
-def parse_bandwidth_value(value: str | int | float) -> float | None:
+def parse_bandwidth_value(value: str | int | float) -> float | str:
     """Parse bandwidth value with suffix to MB/s.
 
     Accepts:
-        - "auto" -> None
+        - "auto" -> "auto"
         - 12GB -> 12000 MB/s
         - 300MB -> 300 MB/s
         - 100Gb -> 12500 MB/s
@@ -201,14 +201,14 @@ def parse_bandwidth_value(value: str | int | float) -> float | None:
     Strict: prefix must be uppercase (K/M/G/T), suffix B/b required.
     """
     if value is None or value == "auto":
-        return None
+        return "auto"
 
     if isinstance(value, (int, float)):
         raise ValueError(f"Bandwidth value requires suffix (e.g. '100MB', '1Gb'): {value}")
 
     value = value.strip()
     if value.lower() == "auto":
-        return None
+        return "auto"
 
     # Match pattern: number + prefix (K/M/G/T) + B or b
     match = re.match(r'^(\d+(?:\.\d+)?)\s*([KMGT])([Bb])$', value)
@@ -237,24 +237,24 @@ def parse_bandwidth_value(value: str | int | float) -> float | None:
         return (num * scale) / 8 / 1e6
 
 
-def parse_iops_value(value: str | int | float) -> float | None:
+def parse_iops_value(value: str | int | float) -> float | str:
     """Parse IOPS value.
 
     Accepts:
-        - "auto" -> None
+        - "auto" -> "auto"
         - integer/float -> value
         - "100K" -> 100000
         - "1M" -> 1000000
     """
     if value is None or value == "auto":
-        return None
+        return "auto"
 
     if isinstance(value, (int, float)):
         return float(value)
 
     value = value.strip()
     if value.lower() == "auto":
-        return None
+        return "auto"
 
     # Match pattern: number + optional prefix (K/M)
     match = re.match(r'^(\d+(?:\.\d+)?)\s*([KM])?$', value, re.IGNORECASE)
@@ -2299,7 +2299,7 @@ def render_display(
                     util_key = f"{device}_util_{row_idx}"
                     observed_max[util_key] = max(observed_max.get(util_key, 0), m.util_pct)
 
-                    max_util = meter.max_value if meter.max_value is not None else 100.0
+                    max_util = meter.max_value if isinstance(meter.max_value, float) else 100.0
                     util_bar = Text("[")
                     util_bar.append_text(render_bar(
                         bar_width,
@@ -2317,7 +2317,7 @@ def render_display(
                     observed_max[iops_key] = max(observed_max.get(iops_key, 0), total_iops)
 
                     # Determine effective max for display
-                    if meter.max_value is not None:
+                    if isinstance(meter.max_value, float):
                         # Explicit max configured
                         effective_max = meter.max_value
                     elif meter.halflife is not None:
@@ -2352,7 +2352,7 @@ def render_display(
                     observed_max[pps_key] = max(observed_max.get(pps_key, 0), total_pps)
 
                     # Determine effective max for display
-                    if meter.max_value is not None:
+                    if isinstance(meter.max_value, float):
                         effective_max = meter.max_value
                     elif meter.halflife is not None:
                         decay_factor = 0.5 ** (interval / meter.halflife)
@@ -2390,7 +2390,7 @@ def render_display(
                     observed_max[bw_key] = max(observed_max.get(bw_key, 0), total_bw)
 
                     # Determine effective max for display
-                    if meter.max_value is not None:
+                    if isinstance(meter.max_value, float):
                         # Explicit max configured
                         effective_max = meter.max_value
                     elif meter.halflife is not None:
@@ -2489,9 +2489,9 @@ def parse_meter(meter_spec, device_type: str = "disk") -> MeterConfig:
 
     Accepts:
         - "utilization" -> MeterConfig(type="utilization", label="util", max_value=100)
-        - "iops" -> MeterConfig(type="iops", label="iops", max_value=None)  # auto
-        - "bandwidth" -> MeterConfig(type="bandwidth", label="band", max_value=None)  # auto
-        - "blank" -> MeterConfig(type="blank", label="", max_value=None)
+        - "iops" -> MeterConfig(type="iops", label="iops", max_value="auto")
+        - "bandwidth" -> MeterConfig(type="bandwidth", label="band", max_value="auto")
+        - "blank" -> MeterConfig(type="blank", label="", max_value="auto")
         - {"iops": {"max": "100K"}} -> MeterConfig(type="iops", label="iops", max_value=100000)
         - {"bandwidth": {"label": "util", "max": "12GB"}} -> MeterConfig(...)
         - {"bandwidth": {"max": "auto", "halflife": "5m"}} -> MeterConfig with decay
@@ -2563,14 +2563,14 @@ def parse_meter(meter_spec, device_type: str = "disk") -> MeterConfig:
     elif meter_type in ("iops", "pps"):
         max_value = parse_iops_value(max_raw)
     else:  # blank
-        max_value = None
+        max_value = "auto"
 
     # Parse halflife (only meaningful for auto meters)
     halflife_raw = meter_opts.get("halflife")
     halflife = parse_time_value(halflife_raw)
 
-    # Warn if halflife set on non-auto meter
-    if halflife is not None and max_value is not None:
+    # Warn if halflife set on fixed-max meter
+    if halflife is not None and isinstance(max_value, float):
         raise ValueError(f"halflife only applies to auto meters (max: auto), got max={max_raw}")
 
     # Parse colors
@@ -2699,7 +2699,7 @@ def load_config(path: Path) -> tuple[dict[str, DiskConfig], int]:
 
         # Pad shorter list with blanks to match lengths
         while len(meters) < len(text):
-            meters.append(MeterConfig(type="blank", label="", max_value=None, halflife=None, color_in="white", color_out="white"))
+            meters.append(MeterConfig(type="blank", label="", max_value="auto", halflife=None, color_in="white", color_out="white"))
         while len(text) < len(meters):
             text.append(TextConfig(type="blank", thresholds=[], val=None, downsample=0))
 
@@ -2901,7 +2901,7 @@ def main():
             elif meter.type == "bandwidth":
                 peak = observed_max.get(f"{device}_bandwidth_{meter_idx}", 0)
                 formatted = format_rate(peak, "bandwidth")
-                if meter.max_value is None:
+                if not isinstance(meter.max_value, float):
                     if meter.halflife is not None:
                         halflife_str = format_time(meter.halflife)
                         lines.append((meter.label, formatted, f"(auto, {halflife_str})"))
@@ -2914,7 +2914,7 @@ def main():
             elif meter.type == "iops":
                 peak = observed_max.get(f"{device}_iops_{meter_idx}", 0)
                 formatted = format_rate(peak, "iops")
-                if meter.max_value is None:
+                if not isinstance(meter.max_value, float):
                     if meter.halflife is not None:
                         halflife_str = format_time(meter.halflife)
                         lines.append((meter.label, formatted, f"(auto, {halflife_str})"))
@@ -2927,7 +2927,7 @@ def main():
             elif meter.type == "pps":
                 peak = observed_max.get(f"{device}_pps_{meter_idx}", 0)
                 formatted = format_rate(peak, "pps")
-                if meter.max_value is None:
+                if not isinstance(meter.max_value, float):
                     if meter.halflife is not None:
                         halflife_str = format_time(meter.halflife)
                         lines.append((meter.label, formatted, f"(auto, {halflife_str})"))
