@@ -2717,7 +2717,53 @@ def load_config(path: Path) -> tuple[dict[str, DiskConfig], int]:
             text_width=cfg.get("text_width"),
         )
 
+    validate_meter_references(configs)
     return configs, columns
+
+
+def is_device_reference(max_value: float | str) -> bool:
+    """Check if max_value is a device reference (not "auto" and not a float)."""
+    return isinstance(max_value, str) and max_value != "auto"
+
+
+def validate_meter_references(configs: dict[str, DiskConfig]) -> None:
+    """Validate meter device references.
+
+    Checks:
+        1. Referenced device exists
+        2. Referenced device uses auto-scaling for that meter type (not fixed max)
+    """
+    for device, cfg in configs.items():
+        for meter in cfg.meters:
+            if is_device_reference(meter.max_value):
+                ref_device = meter.max_value
+                meter_type = meter.type
+
+                # Check 1: Referenced device exists
+                if ref_device not in configs:
+                    raise ValueError(
+                        f"Device '{device}' references unknown device '{ref_device}' "
+                        f"for {meter_type} meter"
+                    )
+
+                # Check 2: Referenced device uses auto-scaling for this meter type
+                ref_cfg = configs[ref_device]
+                ref_meters_of_type = [m for m in ref_cfg.meters if m.type == meter_type]
+
+                if not ref_meters_of_type:
+                    raise ValueError(
+                        f"Device '{device}' references '{ref_device}' for {meter_type}, "
+                        f"but '{ref_device}' has no {meter_type} meters"
+                    )
+
+                # Check that at least one meter of this type uses auto-scaling
+                has_auto = any(m.max_value == "auto" for m in ref_meters_of_type)
+                if not has_auto:
+                    raise ValueError(
+                        f"Device '{device}' references '{ref_device}' for {meter_type}, "
+                        f"but '{ref_device}' uses fixed max. "
+                        f"Linked scaling only works with auto-scaled meters."
+                    )
 
 
 def format_time(seconds: float) -> str:
