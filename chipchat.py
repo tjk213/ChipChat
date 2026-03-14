@@ -197,6 +197,7 @@ def parse_bandwidth_value(value: str | int | float) -> float | str:
         - 300MB -> 300 MB/s
         - 100Gb -> 12500 MB/s
         - 300Mb -> 37.5 MB/s
+        - "device_name" -> "device_name" (device reference for linked scaling)
 
     Strict: prefix must be uppercase (K/M/G/T), suffix B/b required.
     """
@@ -213,12 +214,13 @@ def parse_bandwidth_value(value: str | int | float) -> float | str:
     # Match pattern: number + prefix (K/M/G/T) + B or b
     match = re.match(r'^(\d+(?:\.\d+)?)\s*([KMGT])([Bb])$', value)
     if not match:
-        # Check for common errors
+        # Check for common errors (only if it looks like a bandwidth value attempt)
         if re.match(r'^(\d+(?:\.\d+)?)\s*([kmgt])([Bb])$', value):
             raise ValueError(f"Bandwidth prefix must be uppercase (K/M/G/T): {value}")
         if re.match(r'^(\d+(?:\.\d+)?)\s*([KMGT]?)$', value):
             raise ValueError(f"Bandwidth suffix B (bytes) or b (bits) required: {value}")
-        raise ValueError(f"Invalid bandwidth format: {value}. Expected format like '100MB', '1Gb', '12GB'")
+        # Doesn't look like a bandwidth value - treat as device reference
+        return value
 
     num = float(match.group(1))
     prefix = match.group(2)
@@ -245,6 +247,7 @@ def parse_iops_value(value: str | int | float) -> float | str:
         - integer/float -> value
         - "100K" -> 100000
         - "1M" -> 1000000
+        - "device_name" -> "device_name" (device reference for linked scaling)
     """
     if value is None or value == "auto":
         return "auto"
@@ -259,7 +262,8 @@ def parse_iops_value(value: str | int | float) -> float | str:
     # Match pattern: number + optional prefix (K/M)
     match = re.match(r'^(\d+(?:\.\d+)?)\s*([KM])?$', value, re.IGNORECASE)
     if not match:
-        raise ValueError(f"Invalid IOPS format: {value}. Expected number or '100K', '1M'")
+        # Doesn't look like an IOPS value - treat as device reference
+        return value
 
     num = float(match.group(1))
     prefix = match.group(2)
@@ -2495,6 +2499,7 @@ def parse_meter(meter_spec, device_type: str = "disk") -> MeterConfig:
         - {"iops": {"max": "100K"}} -> MeterConfig(type="iops", label="iops", max_value=100000)
         - {"bandwidth": {"label": "util", "max": "12GB"}} -> MeterConfig(...)
         - {"bandwidth": {"max": "auto", "halflife": "5m"}} -> MeterConfig with decay
+        - {"bandwidth": {"max": "igc0"}} -> MeterConfig with device reference (linked scaling)
         - {"bandwidth": {"color": "green"}} -> both read/write green
         - {"bandwidth": {"color": {"read": "cyan", "write": "magenta"}}} -> separate colors
     """
