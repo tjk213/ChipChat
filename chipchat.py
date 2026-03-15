@@ -2326,7 +2326,8 @@ def render_display(
                         effective_max = meter.max_value
                     elif is_device_reference(meter.max_value):
                         # Device reference: use referenced device's observed_max
-                        ref_key = f"{meter.max_value}_iops_0"
+                        ref_idx = find_auto_meter_index(configs, meter.max_value, "iops") or 0
+                        ref_key = f"{meter.max_value}_iops_{ref_idx}"
                         ref_observed = observed_max.get(ref_key, 0)
                         if meter.halflife is not None:
                             decay_factor = 0.5 ** (interval / meter.halflife)
@@ -2371,7 +2372,8 @@ def render_display(
                         effective_max = meter.max_value
                     elif is_device_reference(meter.max_value):
                         # Device reference: use referenced device's observed_max
-                        ref_key = f"{meter.max_value}_pps_0"
+                        ref_idx = find_auto_meter_index(configs, meter.max_value, "pps") or 0
+                        ref_key = f"{meter.max_value}_pps_{ref_idx}"
                         ref_observed = observed_max.get(ref_key, 0)
                         if meter.halflife is not None:
                             decay_factor = 0.5 ** (interval / meter.halflife)
@@ -2421,7 +2423,8 @@ def render_display(
                         effective_max = meter.max_value
                     elif is_device_reference(meter.max_value):
                         # Device reference: use referenced device's observed_max
-                        ref_key = f"{meter.max_value}_bandwidth_0"
+                        ref_idx = find_auto_meter_index(configs, meter.max_value, "bandwidth") or 0
+                        ref_key = f"{meter.max_value}_bandwidth_{ref_idx}"
                         ref_observed = observed_max.get(ref_key, 0)
                         if meter.halflife is not None:
                             decay_factor = 0.5 ** (interval / meter.halflife)
@@ -2757,6 +2760,16 @@ def load_config(path: Path) -> tuple[dict[str, DiskConfig], int]:
 def is_device_reference(max_value: float | str) -> bool:
     """Check if max_value is a device reference (not "auto" and not a float)."""
     return isinstance(max_value, str) and max_value != "auto"
+
+
+def find_auto_meter_index(configs: dict[str, DiskConfig], device: str, meter_type: str) -> int | None:
+    """Find the index of the first auto-scaled meter of the given type on device."""
+    if device not in configs:
+        return None
+    for idx, meter in enumerate(configs[device].meters):
+        if meter.type == meter_type and meter.max_value == "auto":
+            return idx
+    return None
 
 
 def validate_meter_references(configs: dict[str, DiskConfig]) -> None:
