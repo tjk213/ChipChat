@@ -2184,7 +2184,7 @@ def render_display(
 
             # Calculate bar width for this column
             bar_width = column_width - device_width - label_width - padding
-            bar_width = max(20, bar_width)  # minimum bar width
+            bar_width = max(1, bar_width)  # minimum bar width
 
             device_table = Table(
                 show_header=False,
