@@ -1528,16 +1528,17 @@ def _get_link_speed_macos(device: str) -> int | None:
                 for line in result.stdout.splitlines()
                 if line.strip().startswith("Transmit Rate:")
             ]
-            # Found either zero or >1 transmit rate; return None
-            if len(hits) != 1:
-                return None
-            # Parse the rate
-            parts = hits[0].split(":")
-            assert len(parts) >= 2, "Line with 'Transmit Rate:' doesn't split in 2?"
-            try:
-                link_speed = int(parts[1].strip())
-            except ValueError:
-                pass
+            # If we get exactly 1 hit, then we assume this is the rate we want.
+            # Otherwise, we have either no data or too much data. In both cases,
+            # we fall through and return None.
+            if len(hits) == 1:
+                # Parse the rate
+                parts = hits[0].split(":")
+                assert len(parts) >= 2, "Line with 'Transmit Rate:' doesn't split in 2?"
+                try:
+                    link_speed = int(parts[1].strip())
+                except ValueError:
+                    pass
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
