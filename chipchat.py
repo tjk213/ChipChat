@@ -32,12 +32,17 @@ from argparse import RawTextHelpFormatter as RTHF
 from pathlib import Path
 from dataclasses import dataclass
 
+import rich
+from importlib.metadata import version
+
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 from rich.style import Style
 
+if version('rich') != '14.2.0':
+    raise ImportError(f"ChipChat is incompatible with rich {version('rich')}")
 
 # ASCII art logo (3 lines tall)
 LOGO_TEXT = [
