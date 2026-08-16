@@ -1517,7 +1517,7 @@ def _get_link_speed_macos(device: str) -> int | None:
     link_speed: int | None = None
     try:
         result = subprocess.run(
-            ["system_profiler", "SPAirPortDataType"],
+            ["system_profiler", "SPAirPortDataType", "-detailLevel", "basic"],
             capture_output=True,
             text=True,
             timeout=5,
