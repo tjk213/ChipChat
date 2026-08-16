@@ -1270,7 +1270,7 @@ def _get_wifi_info_macos(device: str) -> WifiInfo:
             ["system_profiler", "SPAirPortDataType", "-detailLevel", "basic"],
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=20,
         )
         if result.returncode != 0:
             return WifiInfo(signal_dbm=None, ssid=None, freq_mhz=None)
@@ -1525,7 +1525,7 @@ def _get_link_speed_macos(device: str) -> int | None:
             ["system_profiler", "SPAirPortDataType", "-detailLevel", "basic"],
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=20,
         )
         if result.returncode == 0:
             hits = [
