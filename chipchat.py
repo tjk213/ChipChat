@@ -1523,25 +1523,21 @@ def _get_link_speed_macos(device: str) -> int | None:
             timeout=5,
         )
         if result.returncode == 0:
-            in_current_network = False
-            for line in result.stdout.splitlines():
-                if "Current Network Information:" in line:
-                    in_current_network = True
-                    continue
-                if in_current_network:
-                    stripped = line.strip()
-                    # Parse "Transmit Rate: 1200"
-                    if stripped.startswith("Transmit Rate:"):
-                        parts = stripped.split(":")
-                        if len(parts) >= 2:
-                            try:
-                                link_speed = int(parts[1].strip())
-                                break
-                            except ValueError:
-                                pass
-                    # Stop at next section
-                    elif line and not line.startswith(" ") and ":" in line:
-                        break
+            hits = [
+                line.strip()
+                for line in result.stdout.splitlines()
+                if line.strip().startswith("Transmit Rate:")
+            ]
+            # Found either zero or >1 transmit rate; return None
+            if len(hits) != 1:
+                return None
+            # Parse the rate
+            parts = hits[0].split(":")
+            assert len(parts) >= 2, "Line with 'Transmit Rate:' doesn't split in 2?"
+            try:
+                link_speed = int(parts[1].strip())
+            except ValueError:
+                pass
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
