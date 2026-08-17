@@ -27,6 +27,9 @@ import time
 import shutil
 import yaml
 
+if platform.system() == "Darwin":
+    import CoreWLAN  # pyobjc-framework-CoreWLAN
+
 from argparse import ArgumentParser
 from argparse import RawTextHelpFormatter as RTHF
 from pathlib import Path
@@ -1243,75 +1246,43 @@ _MACOS_WIFI_CACHE_TTL = 60.0  # seconds
 
 
 def _get_wifi_info_macos(device: str) -> WifiInfo:
-    """Get WiFi info using system_profiler (macOS)
+    """Get WiFi info using CoreWLAN (macOS)
 
-    Results are cached for 60 seconds since system_profiler is slow.
+    Queries the named interface directly - no subprocess, no sudo, and fast
+    enough (microseconds) that no caching is needed.
 
-    Parses output like:
-        Current Network Information:
-            Isle of Faces:
-              PHY Mode: 802.11ax
-              Channel: 100 (5GHz, 80MHz)
-              Signal / Noise: -38 dBm / -86 dBm
+    Note: ssid() returns None unless the app context running chipchat (the
+    terminal app, or Python.app for framework builds) has Location Services
+    permission. Signal and freq work without the permission.
     """
-    # Check cache
-    now = time.time()
-    if device in _macos_wifi_cache:
-        cached_time, cached_info = _macos_wifi_cache[device]
-        if now - cached_time < _MACOS_WIFI_CACHE_TTL:
-            return cached_info
-
-    signal_dbm: float | None = None
-    ssid: str | None = None
-    freq_mhz: float | None = None
-
     try:
-        result = subprocess.run(
-            ["system_profiler", "SPAirPortDataType", "-detailLevel", "basic"],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-        if result.returncode != 0:
+        iface = CoreWLAN.CWWiFiClient.sharedWiFiClient().interfaceWithName_(device)
+        if iface is None:
             return WifiInfo(signal_dbm=None, ssid=None, freq_mhz=None)
 
-        in_current_network = False
-        for line in result.stdout.splitlines():
-            stripped = line.strip()
+        ssid = iface.ssid()
 
-            if "Current Network Information:" in line:
-                in_current_network = True
-                continue
+        # rssiValue() reports 0 when not associated
+        rssi = iface.rssiValue()
+        signal_dbm = float(rssi) if rssi != 0 else None
 
-            if in_current_network:
-                # SSID is the first indented key after "Current Network Information:"
-                # It appears as "          NetworkName:" with extra indentation
-                if ssid is None and stripped.endswith(":") and not stripped.startswith(("PHY", "Channel", "Country", "Network", "Security", "Signal", "Transmit", "MCS")):
-                    ssid = stripped.rstrip(":")
+        # Map the channel band to a frequency, matching the display
+        # convention of the old system_profiler parser (2.40/5.00/6.00GHz).
+        # Older pyobjc bindings may lack the 6GHz constant, hence the
+        # getattr defaults (the enum values are stable ABI).
+        freq_mhz: float | None = None
+        channel = iface.wlanChannel()
+        if channel is not None:
+            freq_mhz = {
+                getattr(CoreWLAN, "kCWChannelBand2GHz", 1): 2400.0,
+                getattr(CoreWLAN, "kCWChannelBand5GHz", 2): 5000.0,
+                getattr(CoreWLAN, "kCWChannelBand6GHz", 3): 6000.0,
+            }.get(channel.channelBand())
 
-                # Parse "Signal / Noise: -38 dBm / -86 dBm"
-                elif stripped.startswith("Signal / Noise:"):
-                    match = re.search(r'(-?\d+)\s*dBm', stripped)
-                    if match:
-                        signal_dbm = float(match.group(1))
-
-                # Parse "Channel: 100 (5GHz, 80MHz)" or "Channel: 6 (2.4GHz)"
-                elif stripped.startswith("Channel:"):
-                    # Extract frequency from parentheses
-                    match = re.search(r'\((\d+(?:\.\d+)?)\s*GHz', stripped)
-                    if match:
-                        freq_mhz = float(match.group(1)) * 1000
-
-                # Stop if we hit another section
-                elif line and not line.startswith(" ") and ":" in line:
-                    break
-
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-
-    info = WifiInfo(signal_dbm=signal_dbm, ssid=ssid, freq_mhz=freq_mhz)
-    _macos_wifi_cache[device] = (now, info)
-    return info
+        return WifiInfo(signal_dbm=signal_dbm, ssid=ssid, freq_mhz=freq_mhz)
+    except Exception:
+        # Never let an ObjC bridge failure crash the render loop
+        return WifiInfo(signal_dbm=None, ssid=None, freq_mhz=None)
 
 
 def _get_wifi_info_freebsd(device: str) -> WifiInfo:

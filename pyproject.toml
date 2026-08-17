@@ -25,6 +25,7 @@ license = {text = "MIT"}
 dependencies = [
     "pyyaml",
     "rich==14.2.0",
+    'pyobjc-framework-CoreWLAN; sys_platform == "darwin"',
 ]
 
 [project.scripts]
