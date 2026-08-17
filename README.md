@@ -22,6 +22,13 @@ I/O monitor showing meters for disks and network interfaces.
 ChipChat % pip install -e .
 ```
 
+### MacOS Prerequisites
+
+On mac, some meters & text fields require additional tools for proper display:
+
+  - Disk temperature: requires `brew install smartmontools`
+  - Network SSID: requires location permissions granted to running python interpreter
+
 ## Configuration
 
 Create a config file at `~/.config/chipchat/config.yaml`:
