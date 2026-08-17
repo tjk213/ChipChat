@@ -1240,10 +1240,6 @@ def _get_wifi_info_linux(device: str) -> WifiInfo:
     return WifiInfo(signal_dbm=signal_dbm, ssid=ssid, freq_mhz=freq_mhz)
 
 
-# Cache for macOS system_profiler results (it's slow)
-_macos_wifi_cache: dict = {}
-_MACOS_WIFI_CACHE_TTL = 60.0  # seconds
-
 
 def _get_wifi_info_macos(device: str) -> WifiInfo:
     """Get WiFi info using CoreWLAN (macOS)
@@ -1458,7 +1454,7 @@ def _get_link_speed_macos(device: str) -> int | None:
     """Get link speed on macOS
 
     For wired interfaces: parse ifconfig media line
-    For WiFi: parse system_profiler Transmit Rate
+    For WiFi: CoreWLAN transmit rate
     """
     # Try ifconfig first (works for wired interfaces)
     try:
@@ -1482,44 +1478,17 @@ def _get_link_speed_macos(device: str) -> int | None:
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
-    # Fall back to system_profiler for WiFi (with caching)
-    now = time.time()
-    cache_key = f"link_speed:{device}"
-    if cache_key in _macos_wifi_cache:
-        cached_time, cached_speed = _macos_wifi_cache[cache_key]
-        if now - cached_time < _MACOS_WIFI_CACHE_TTL:
-            return cached_speed
-
-    link_speed: int | None = None
+    # Fall back to CoreWLAN for WiFi
     try:
-        result = subprocess.run(
-            ["system_profiler", "SPAirPortDataType", "-detailLevel", "basic"],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-        if result.returncode == 0:
-            hits = [
-                line.strip()
-                for line in result.stdout.splitlines()
-                if line.strip().startswith("Transmit Rate:")
-            ]
-            # If we get exactly 1 hit, then we assume this is the rate we want.
-            # Otherwise, we have either no data or too much data. In both cases,
-            # we fall through and return None.
-            if len(hits) == 1:
-                # Parse the rate
-                parts = hits[0].split(":")
-                assert len(parts) >= 2, "Line with 'Transmit Rate:' doesn't split in 2?"
-                try:
-                    link_speed = int(parts[1].strip())
-                except ValueError:
-                    pass
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-
-    _macos_wifi_cache[cache_key] = (now, link_speed)
-    return link_speed
+        iface = CoreWLAN.CWWiFiClient.sharedWiFiClient().interfaceWithName_(device)
+        if iface is None:
+            return None
+        # transmitRate() is Mbps as a float; 0.0 when not associated
+        rate = iface.transmitRate()
+        return int(rate) if rate else None
+    except Exception:
+        # Never let an ObjC bridge failure crash the render loop
+        return None
 
 
 def get_nic_hwmon_path(device: str) -> Path | None:
