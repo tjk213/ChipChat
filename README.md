@@ -19,7 +19,6 @@ I/O monitor showing meters for disks and network interfaces.
 ## Installation
 
 ```bash
-ChipChat % pip install -r requirements.txt
 ChipChat % pip install -e .
 ```
 
