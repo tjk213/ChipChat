@@ -1808,7 +1808,7 @@ def render_bar(
     width: int,
     value: float,
     max_value: float = 100.0,
-    char: str = "│",
+    char: str = "|",
     fill_style: Style = Style(color="green"),
 ) -> Text:
     """Render a single-color bar"""
